@@ -60,7 +60,7 @@ start_link({Server, WriterPid}) ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([Server, WriterPid]) ->
-  {ok, #state{name = Server, writer = WriterPid, clients =[]}}.
+  {ok, #state{name = Server, writer = WriterPid, clients = []}}.
 
 %%--------------------------------------------------------------------
 %% @private
