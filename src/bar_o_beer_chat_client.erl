@@ -26,6 +26,9 @@ start([UsernameArg]) ->
 %% Gen_server
   {ok, ServerPid} = chat_server:start_link({Username, WriterPid}),
 
+  %%TODO fun that prints local history (for a start)
+  print_history(WriterPid),
+
 %% TODO Process that receives messages
   spawn_link(?MODULE, tcp_receiver_loop, [ServerPid]),
 
@@ -66,4 +69,9 @@ tcp_receiver_loop(ServerPid) ->
 
   %% Must send messages to ServerPid in following format: gen_server:call(ServerPid, {print, Username, Message})
 
+  ok.
+
+print_history(WriterPid) ->
+  %% You get the list of messages from db and print them
+  %% It's better to do it like: WriterPid ! {message, {Username, Message}}.
   ok.
