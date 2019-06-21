@@ -24,7 +24,7 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {name :: term(), writer :: pid()}).
+-record(state, {name :: term(), writer :: pid(), clients = [] :: [term()]}).
 
 %%%===================================================================
 %%% API
@@ -60,7 +60,7 @@ start_link({Server, WriterPid}) ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([Server, WriterPid]) ->
-  {ok, #state{name = Server, writer = WriterPid}}.
+  {ok, #state{name = Server, writer = WriterPid, clients =[]}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -170,6 +170,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 send_message({Name, Message, State}) ->
+  Clients = State#state.clients,
   ok.
 
 save_message({Name, Message}) ->
