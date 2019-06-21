@@ -80,7 +80,7 @@ init([Server, WriterPid]) ->
 
 handle_call({send, Message}, _From, State) ->
   {_, Name, _} = State,
-  %% TODO create fun that send messages
+  %% TODO create fun that send messages State - list of client, which should send
   send_message({Name, Message, State}),
   %% This function is called to emulate that this message was sent to all clients including this
   handle_call({print, Name, Message}, _From, State);

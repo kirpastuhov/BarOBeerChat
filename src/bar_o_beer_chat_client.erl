@@ -69,6 +69,7 @@ tcp_receiver_loop(ServerPid) ->
 
   %% Must send messages to ServerPid in following format: gen_server:call(ServerPid, {print, Username, Message})
 
+
   ok.
 
 print_history(WriterPid) ->
