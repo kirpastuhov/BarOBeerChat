@@ -14,21 +14,30 @@
 %% API
 -export([start/1]).
 
--export([writer_loop/0, reader_loop/1, fantom_writer/1]).
+-export([writer_loop/0, reader_loop/1, fantom_writer/1, tcp_receiver_loop/1]).
 
 start([UsernameArg]) ->
 
   Username = atom_to_list(UsernameArg),
-%% Запуск райтера
+
+%% Process that handle incoming messages
   WriterPid = spawn_link(?MODULE, writer_loop, []),
-%% Запуск ген сервера
+
+%% Gen_server
   {ok, ServerPid} = chat_server:start_link({Username, WriterPid}),
-%% Запуск фантома
+
+%% TODO Process that receives messages
+  spawn_link(?MODULE, tcp_receiver_loop, [ServerPid]),
+
+%% Process that emulates someone speaks to you
   spawn_link(?MODULE, fantom_writer, [ServerPid]),
-%% Запуск ридера
+
+%% Process that handle input
   reader_loop(ServerPid),
+
   init:stop().
 
+%%Loop that prints incoming messages
 writer_loop() ->
   receive
     {message, {Username, Message}} -> io:format("<~s> ~s~n", [Username, Message]),
@@ -38,6 +47,7 @@ writer_loop() ->
       writer_loop()
   end.
 
+%%Loop that handle input
 reader_loop(ServerPid) ->
   Input = string:strip(io:get_line(""), both, $\n),
   case Input of
@@ -46,8 +56,14 @@ reader_loop(ServerPid) ->
       reader_loop(ServerPid)
   end.
 
-
+%%Fun to emulate someone is chatting with you
 fantom_writer(ServerPid) ->
   timer:sleep(10000),
   gen_server:call(ServerPid, {print, "Phantom", "Ha-ha-ha"}),
   fantom_writer(ServerPid).
+
+tcp_receiver_loop(ServerPid) ->
+
+  %% Must send messages to ServerPid in following format: gen_server:call(ServerPid, {print, Username, Message})
+
+  ok.

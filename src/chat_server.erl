@@ -80,7 +80,9 @@ init([Server, WriterPid]) ->
 
 handle_call({send, Message}, _From, State) ->
   {_, Name, _} = State,
+  %% TODO create fun that send messages
   send_message({Name, Message, State}),
+  %% This function is called to emulate that this message was sent to all clients including this
   handle_call({print, Name, Message}, _From, State);
 
 handle_call(shutdown, _From, State) ->
@@ -91,6 +93,8 @@ handle_call(shutdown, _From, State) ->
 
 handle_call({print, Username, Message}, _From, State) ->
   {_, _, WriterPid} = State,
+  %% TODO create fun that saves messages
+  save_message({Username, Message}),
   WriterPid ! {message, {Username, Message}},
   {reply, ok, State};
 
@@ -166,4 +170,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 send_message({Name, Message, State}) ->
+  ok.
+
+save_message({Name, Message}) ->
   ok.
