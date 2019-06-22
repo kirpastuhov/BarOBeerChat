@@ -14,11 +14,12 @@
 %% API
 -export([start/1]).
 
--export([writer_loop/0, reader_loop/1, fantom_writer/1, tcp_receiver_loop/1]).
+-export([writer_loop/0, reader_loop/1, fantom_writer/1, tcp_receiver_loop/2, accept/2, handle_connection/2]).
 
-start([UsernameArg]) ->
+start([UsernameArg, PortArg]) ->
 
   Username = atom_to_list(UsernameArg),
+  Port = list_to_integer(atom_to_list(PortArg)),
 
 %% Process that handle incoming messages
   WriterPid = spawn_link(?MODULE, writer_loop, []),
@@ -29,8 +30,7 @@ start([UsernameArg]) ->
   %%TODO fun that prints local history (for a start)
   print_history(WriterPid),
 
-%% TODO Process that receives messages
-  spawn_link(?MODULE, tcp_receiver_loop, [ServerPid]),
+  spawn_link(?MODULE, tcp_receiver_loop, [ServerPid, Port]),
 
 %% Process that emulates someone speaks to you
   spawn_link(?MODULE, fantom_writer, [ServerPid]),
@@ -65,12 +65,38 @@ fantom_writer(ServerPid) ->
   gen_server:call(ServerPid, {print, "Phantom", "Ha-ha-ha"}),
   fantom_writer(ServerPid).
 
-tcp_receiver_loop(ServerPid) ->
+tcp_receiver_loop(ServerPid, Port) ->
 
   %% Must send messages to ServerPid in following format: gen_server:call(ServerPid, {print, Username, Message})
 
-
+  {ok, ListenSocket} = gen_tcp:listen(Port, [binary, {active, false}, {packet, raw}]),
+  spawn(?MODULE, accept, [ListenSocket, ServerPid]),
+  timer:sleep(infinity),
   ok.
+
+
+
+accept(ListenSocket, ServerPid) ->
+  {ok, Socket} = gen_tcp:accept(ListenSocket),
+  spawn(?MODULE, handle_connection, [Socket, ServerPid]),
+  accept(ListenSocket, ServerPid).
+
+handle_connection(Socket, ServerPid) ->
+  case gen_tcp:recv(Socket, 0, 10000) of
+    {ok, Msg} -> {Username, Text} = binary_to_term(Msg),
+      gen_server:call(ServerPid, {print, Username, Text}),
+
+      gen_tcp:close(Socket);
+
+    {error, closed} ->
+      io:format("error"),
+      gen_tcp:close(Socket);
+    {error, timeout} ->
+      io:format("Socket , session closed by timeout ~n"),
+      gen_tcp:close(Socket)
+
+  end.
+
 
 print_history(WriterPid) ->
   %% You get the list of messages from db and print them
