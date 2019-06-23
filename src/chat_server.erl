@@ -25,7 +25,7 @@
 -define(SERVER, ?MODULE).
 
 -record(state, {name :: term(), writer :: pid(), clients = [] :: [term()]}).
-
+-record(message, {msg_id, name, message}).
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -61,7 +61,7 @@ start_link({Server, WriterPid}) ->
   {stop, Reason :: term()} | ignore).
 init([Server, WriterPid]) ->
   Host = "localhost",
-  {ok, #state{name = Server, writer = WriterPid, clients = [{Host, 4200}, {Host, 1234}, {Host,1324}]}}.
+  {ok, #state{name = Server, writer = WriterPid, clients = [{Host, 4200}, {Host, 1234}]}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -187,4 +187,8 @@ send_message({Name, Message, State}) ->
 
 
 save_message({Name, Message}) ->
-  ok.
+
+  Row = #message{name = Name, message = Message,
+    msg_id = mnesia:dirty_last(message) + 1},
+  F = fun () -> mnesia:write(Row) end,
+  mnesia:transaction(F).
