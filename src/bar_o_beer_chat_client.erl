@@ -9,12 +9,18 @@
 -module(bar_o_beer_chat_client).
 -author("User").
 
+-include_lib("stdlib/include/qlc.hrl").
+
+-record(message, {msg_id, name, message}).
+
 -import(chat_server, [start_link/1]).
+
+-import(lists, [foreach/2]).
 
 %% API
 -export([start/1]).
 
--export([writer_loop/0, reader_loop/1, fantom_writer/1, tcp_receiver_loop/2, accept/2, handle_connection/2]).
+-export([writer_loop/0, reader_loop/1, fantom_writer/1, tcp_receiver_loop/2, accept/2, handle_connection/2, init/0, reset_tables/0, print_history/1]).
 
 start([UsernameArg, PortArg]) ->
 
@@ -98,7 +104,49 @@ handle_connection(Socket, ServerPid) ->
   end.
 
 
+do(Q, WriterPid) ->
+    F = fun () -> qlc:e(Q) end,
+    {atomic, Val} = mnesia:transaction(F),
+    % Val.
+    Fun = fun (Message) ->
+		  %   {Username, Msg} = Message, io:format("~p~n", [Msg])
+		  {Username, Msg} = Message,
+		  WriterPid ! {message, {Username, Msg}}
+	  end,
+    lists:map(Fun, Val).
+
+   
 print_history(WriterPid) ->
+  mnesia:start(),
+  do(qlc:q([{X#message.name, X#message.message} || X <- mnesia:table(message)]), WriterPid).
   %% You get the list of messages from db and print them
   %% It's better to do it like: WriterPid ! {message, {Username, Message}}.
-  ok.
+
+init() ->  
+    
+    %% Run this method to create schema and tables. 
+    %% TODO: Add smth like try/catch to check if the schema and table exsists
+
+    mnesia:create_schema([node()]),
+    mnesia:start(),
+    mnesia:create_table(message,
+			[{attributes, record_info(fields, message)},
+			 {disc_copies, [node()]}, {type, ordered_set}]).
+    % mnesia:stop().
+
+
+%% Run reset_tables() to put some debug data in table
+
+example_tables() ->
+    [
+     {message, 0, "kirill", "hi"},
+     {message, 1, "alex", "hi, how are u?"},
+     {message, 2, "kirill", "fine, thanks. you?"}].
+
+reset_tables() ->
+    mnesia:start(),
+    mnesia:clear_table(message),
+    F = fun () ->
+		foreach(fun mnesia:write/1, example_tables())
+	end,
+    mnesia:transaction(F).
