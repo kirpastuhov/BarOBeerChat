@@ -60,7 +60,8 @@ start_link({Server, WriterPid}) ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([Server, WriterPid]) ->
-  {ok, #state{name = Server, writer = WriterPid, clients = []}}.
+  Host = "localhost",
+  {ok, #state{name = Server, writer = WriterPid, clients = [{Host, 4200}, {Host, 1234}, {Host,1324}]}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -79,24 +80,25 @@ init([Server, WriterPid]) ->
   {stop, Reason :: term(), NewState :: #state{}}).
 
 handle_call({send, Message}, _From, State) ->
-  {_, Name, _} = State,
-  %% TODO create fun that send messages State - list of client, which should send
+  {_, Name, _, _} = State,
   send_message({Name, Message, State}),
-  %% This function is called to emulate that this message was sent to all clients including this
-  handle_call({print, Name, Message}, _From, State);
+  {reply, ok, State};
+
 
 handle_call(shutdown, _From, State) ->
-  {_, _, WriterPid} = State,
+  {_, _, WriterPid, _} = State,
   WriterPid ! shutdown,
   {stop, normal, ok, State};
 
 
 handle_call({print, Username, Message}, _From, State) ->
-  {_, _, WriterPid} = State,
+  {_, _, WriterPid, _} = State,
   %% TODO create fun that saves messages
   save_message({Username, Message}),
   WriterPid ! {message, {Username, Message}},
   {reply, ok, State};
+
+
 
 
 handle_call(_Request, _From, State) ->
@@ -171,7 +173,18 @@ code_change(_OldVsn, State, _Extra) ->
 
 send_message({Name, Message, State}) ->
   Clients = State#state.clients,
-  ok.
+  F = fun(Client) ->
+    {Host, Port} = Client,
+    {ok, Socket} =  gen_tcp:connect(Host, Port, [binary, {active, true}, {packet, raw}]),
+    Msg = {Name, Message},
+    gen_tcp:send(Socket, term_to_binary(Msg))
+    end,
+    lists:map(F, Clients),
+    ok.
+
+
+
+
 
 save_message({Name, Message}) ->
   ok.
