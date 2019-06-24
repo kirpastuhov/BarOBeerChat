@@ -23,7 +23,7 @@
 -export([init/0, writer_loop/0, reader_loop/2, tcp_receiver_loop/2, accept/2, handle_connection/2]).
 
 start([UsernameArg, PortArg]) ->
-
+  init(),
   Username = atom_to_list(UsernameArg),
   Port = list_to_integer(atom_to_list(PortArg)),
 
