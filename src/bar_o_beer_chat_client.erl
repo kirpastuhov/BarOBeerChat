@@ -20,7 +20,7 @@
 %% API
 -export([start/1]).
 
--export([writer_loop/0, reader_loop/2, tcp_receiver_loop/2, accept/2, handle_connection/2]).
+-export([init/0, writer_loop/0, reader_loop/2, tcp_receiver_loop/2, accept/2, handle_connection/2]).
 
 start([UsernameArg, PortArg]) ->
 
@@ -113,3 +113,25 @@ print_history(WriterPid) ->
   mnesia:start(),
   mnesia:wait_for_tables([message], 20000),
   do(qlc:q([{X#message.name, X#message.message} || X <- mnesia:table(message)]), WriterPid).
+
+init() ->
+    case mnesia:create_schema([node()]) of
+      {error,
+       {nonode@nohost, {already_exists, nonode@nohost}}} ->
+	  ok;
+      ok -> ok
+    end,
+    mnesia:start(),
+    case mnesia:create_table(message,
+			     [{attributes, record_info(fields, message)},
+			      {disc_copies, [node()]}, {type, ordered_set}])
+	of
+      {aborted, {already_exists, message}} -> ok;
+      {atomic, ok} ->
+	  Row = #message{name = system,
+			 message = " start of the chat room ", msg_id = 0},
+	  F = fun () -> mnesia:write(Row) end,
+	  mnesia:transaction(F),
+	  ok
+    end,
+    mnesia:wait_for_tables([message], 20000).
