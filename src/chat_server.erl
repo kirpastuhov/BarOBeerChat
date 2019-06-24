@@ -38,8 +38,8 @@
 %%--------------------------------------------------------------------
 -spec(start_link(Arg :: term()) ->
   {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
-start_link({Server, WriterPid}) ->
-  gen_server:start_link(?MODULE, [Server, WriterPid], []).
+start_link({Username, WriterPid, Clients}) ->
+  gen_server:start_link(?MODULE, [Username, WriterPid, Clients], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -59,9 +59,13 @@ start_link({Server, WriterPid}) ->
 -spec(init(Args :: term()) ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
-init([Server, WriterPid]) ->
-  Host = "localhost",
-  {ok, #state{name = Server, writer = WriterPid, clients = [{Host, 4200}, {Host, 1234}]}}.
+init([Username, WriterPid, Clients]) ->
+  if
+    length(Clients) /= 1 ->
+      join(Username, Clients);
+    true -> ok
+  end,
+  {ok, #state{name = Username, writer = WriterPid, clients = Clients}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -84,9 +88,34 @@ handle_call({send, Message}, _From, State) ->
   send_message({Name, Message, State}),
   {reply, ok, State};
 
+handle_call({joined, Client}, _From, State) ->
+  {Tag, Username, WriterPid, Clients} = State,
+  {Guest, Address, Port} = Client,
+  WriterPid ! {message, {Guest, "joined"}},
+  send_clients_list({Address, Port}, Clients),
+  NewState = {Tag, Username, WriterPid, [{Address, Port} | Clients]},
+  {reply, ok, NewState};
+
+handle_call({left, Client}, _From, State) ->
+  {Tag, Username, WriterPid, Clients} = State,
+  {Guest, Address, Port} = Client,
+  WriterPid ! {message, {Guest, "left"}},
+  NewClients = lists:delete({Address, Port}, Clients),
+  NewState = {Tag, Username, WriterPid, NewClients},
+  {reply, ok, NewState};
+
+handle_call({join, NewClients}, _From, State) ->
+  {Tag, Username, WriterPid, Clients} = State,
+  [ThisClient | RemoteNodes ] = lists:reverse(Clients),
+  DifferentClients = get_difference(RemoteNodes, NewClients),
+  join(Username, lists:reverse([ThisClient | DifferentClients])),
+  NewState = {Tag, Username, WriterPid, DifferentClients ++ Clients},
+  {reply, ok, NewState};
+
 
 handle_call(shutdown, _From, State) ->
-  {_, _, WriterPid, _} = State,
+  {_, Username, WriterPid, Clients} = State,
+  leave(Username, Clients),
   WriterPid ! shutdown,
   {stop, normal, ok, State};
 
@@ -102,7 +131,7 @@ handle_call({print, Username, Message}, _From, State) ->
 
 
 handle_call(_Request, _From, State) ->
-  {reply, [_Request|State], State}.
+  {reply, [_Request | State], State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -175,14 +204,12 @@ send_message({Name, Message, State}) ->
   Clients = State#state.clients,
   F = fun(Client) ->
     {Host, Port} = Client,
-    {ok, Socket} =  gen_tcp:connect(Host, Port, [binary, {active, true}, {packet, raw}]),
-    Msg = {Name, Message},
+    {ok, Socket} = gen_tcp:connect(Host, Port, [binary, {active, true}, {packet, raw}]),
+    Msg = {message, Name, Message},
     gen_tcp:send(Socket, term_to_binary(Msg))
-    end,
-    lists:map(F, Clients),
-    ok.
-
-
+      end,
+  lists:map(F, Clients),
+  ok.
 
 
 
@@ -190,5 +217,53 @@ save_message({Name, Message}) ->
 
   Row = #message{name = Name, message = Message,
     msg_id = mnesia:dirty_last(message) + 1},
-  F = fun () -> mnesia:write(Row) end,
+  F = fun() -> mnesia:write(Row) end,
   mnesia:transaction(F).
+
+
+
+leave(Username, Clients) ->
+  [ThisClient | RemoteNodes] = lists:reverse(Clients),
+  {LocalAddress, LocalPort} = ThisClient,
+  F = fun(Client) ->
+    {Address, RemotePort} = Client,
+    {ok, Socket} = gen_tcp:connect(Address, RemotePort, [binary, {active, true}, {packet, raw}]),
+    gen_tcp:send(Socket, term_to_binary({left, {Username, LocalAddress, LocalPort}})),
+    gen_tcp:close(Socket)
+      end,
+
+  lists:map(F, RemoteNodes).
+
+join(Username, Clients) ->
+  [ThisClient | RemoteNodes] = lists:reverse(Clients),
+  {LocalAddress, LocalPort} = ThisClient,
+
+  F = fun(Client) ->
+    {Address, RemotePort} = Client,
+    {ok, Socket} = gen_tcp:connect(Address, RemotePort, [binary, {active, true}, {packet, raw}]),
+    gen_tcp:send(Socket, term_to_binary({join, {Username, LocalAddress, LocalPort}})),
+    gen_tcp:close(Socket)
+      end,
+
+  lists:map(F, RemoteNodes).
+
+send_clients_list(NewClient, Clients) ->
+  {Address, Port} = NewClient,
+  {ok, Socket} = gen_tcp:connect(Address, Port, [binary, {active, true}, {packet, raw}]),
+  gen_tcp:send(Socket, term_to_binary({client_list, Clients})),
+  gen_tcp:close(Socket).
+
+get_difference(List1, List2) ->
+  F = fun(Client, DifferenceList) ->
+    Val = lists:member(Client, List2),
+    if Val -> DifferenceList;
+      true -> [Client | DifferenceList]
+    end
+      end,
+  F2 = fun(Client, DifferenceList) ->
+    Val = lists:member(Client, List1),
+    if Val -> DifferenceList;
+      true -> [Client | DifferenceList]
+    end
+       end,
+  lists:foldl(F2, [], List2) ++ lists:foldl(F, [], List1).

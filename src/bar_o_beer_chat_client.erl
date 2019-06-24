@@ -15,29 +15,46 @@
 
 -import(chat_server, [start_link/1]).
 
--import(lists, [foreach/2]).
 
 %% API
 -export([start/1]).
 
 -export([init/0, writer_loop/0, reader_loop/2, tcp_receiver_loop/2, accept/2, handle_connection/2]).
 
-start([UsernameArg, PortArg]) ->
-  init(),
-  Username = atom_to_list(UsernameArg),
-  Port = list_to_integer(atom_to_list(PortArg)),
+start([UsernameArg, PortArg, AddressArg, RemotePortArg]) ->
 
+  Username = atom_to_list(UsernameArg),
+  LocalPort = list_to_integer(atom_to_list(PortArg)),
+  RemoteAddress = atom_to_list(AddressArg),
+  RemotePort = list_to_integer(atom_to_list(RemotePortArg)),
+  LocalAddress = "localhost",
+
+  main(Username, [{RemoteAddress, RemotePort}, {LocalAddress, LocalPort}]);
+
+
+start([UsernameArg, PortArg]) ->
+  Username = atom_to_list(UsernameArg),
+  LocalPort = list_to_integer(atom_to_list(PortArg)),
+  LocalAddress = "localhost",
+
+  main(Username, [{LocalAddress, LocalPort}]).
+
+
+main(Username, Clients) ->
+  init(),
 %% Process that handle incoming messages
   WriterPid = spawn_link(?MODULE, writer_loop, []),
 
+  [ThisClient | _] = lists:reverse(Clients),
+  {_, LocalPort} = ThisClient,
+
 %% Gen_server
-  {ok, ServerPid} = chat_server:start_link({Username, WriterPid}),
+  {ok, ServerPid} = chat_server:start_link({Username, WriterPid, Clients}),
 
   %%prints local history (for a start)
   print_history(WriterPid),
 
-  spawn_link(?MODULE, tcp_receiver_loop, [ServerPid, Port]),
-
+  spawn_link(?MODULE, tcp_receiver_loop, [ServerPid, LocalPort]),
 
 %% Process that handle input
   reader_loop(ServerPid, WriterPid),
@@ -60,16 +77,13 @@ reader_loop(ServerPid, WriterPid) ->
   case Input of
     "exit" -> gen_server:call(ServerPid, shutdown);
     _ -> gen_server:call(ServerPid, {send, Input}),
-      io:format(os:cmd(clear)),
-      print_history(WriterPid),
+%%      io:format(os:cmd(clear)),
+%%      print_history(WriterPid),
       reader_loop(ServerPid, WriterPid)
   end.
 
 
 tcp_receiver_loop(ServerPid, Port) ->
-
-  %% Must send messages to ServerPid in following format: gen_server:call(ServerPid, {print, Username, Message})
-
   {ok, ListenSocket} = gen_tcp:listen(Port, [binary, {active, false}, {packet, raw}]),
   spawn(?MODULE, accept, [ListenSocket, ServerPid]),
   timer:sleep(infinity),
@@ -84,9 +98,18 @@ accept(ListenSocket, ServerPid) ->
 
 handle_connection(Socket, ServerPid) ->
   case gen_tcp:recv(Socket, 0, 10000) of
-    {ok, Msg} -> {Username, Text} = binary_to_term(Msg),
-      gen_server:call(ServerPid, {print, Username, Text}),
-
+    {ok, Msg} ->
+      Input = binary_to_term(Msg),
+      case Input of
+        {message, Username, Text} ->
+          gen_server:call(ServerPid, {print, Username, Text});
+        {join, {Username, Address, Port}} ->
+          gen_server:call(ServerPid, {joined, {Username, Address, Port}});
+        {left, {Username, LocalAddress, LocalPort}} ->
+          gen_server:call(ServerPid, {left, {Username, LocalAddress, LocalPort}});
+        {client_list, Clients} ->
+          gen_server:call(ServerPid, {join, Clients})
+      end,
       gen_tcp:close(Socket);
 
     {error, closed} ->
@@ -115,23 +138,23 @@ print_history(WriterPid) ->
   do(qlc:q([{X#message.name, X#message.message} || X <- mnesia:table(message)]), WriterPid).
 
 init() ->
-    case mnesia:create_schema([node()]) of
-      {error,
-       {nonode@nohost, {already_exists, nonode@nohost}}} ->
-	  ok;
-      ok -> ok
-    end,
-    mnesia:start(),
-    case mnesia:create_table(message,
-			     [{attributes, record_info(fields, message)},
-			      {disc_copies, [node()]}, {type, ordered_set}])
-	of
-      {aborted, {already_exists, message}} -> ok;
-      {atomic, ok} ->
-	  Row = #message{name = system,
-			 message = " start of the chat room ", msg_id = 0},
-	  F = fun () -> mnesia:write(Row) end,
-	  mnesia:transaction(F),
-	  ok
-    end,
-    mnesia:wait_for_tables([message], 20000).
+  case mnesia:create_schema([node()]) of
+    {error,
+      {_, {already_exists, _}}} ->
+      ok;
+    ok -> ok
+  end,
+  mnesia:start(),
+  case mnesia:create_table(message,
+    [{attributes, record_info(fields, message)},
+      {disc_copies, [node()]}, {type, ordered_set}])
+  of
+    {aborted, {already_exists, message}} -> ok;
+    {atomic, ok} ->
+      Row = #message{name = system,
+        message = " start of the chat room ", msg_id = 0},
+      F = fun() -> mnesia:write(Row) end,
+      mnesia:transaction(F),
+      ok
+  end,
+  mnesia:wait_for_tables([message], 20000).
