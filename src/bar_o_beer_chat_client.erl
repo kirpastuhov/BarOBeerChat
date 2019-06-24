@@ -20,7 +20,7 @@
 %% API
 -export([start/1]).
 
--export([writer_loop/0, reader_loop/1, tcp_receiver_loop/2, accept/2, handle_connection/2]).
+-export([writer_loop/0, reader_loop/2, tcp_receiver_loop/2, accept/2, handle_connection/2]).
 
 start([UsernameArg, PortArg]) ->
 
@@ -40,7 +40,7 @@ start([UsernameArg, PortArg]) ->
 
 
 %% Process that handle input
-  reader_loop(ServerPid),
+  reader_loop(ServerPid, WriterPid),
 
   init:stop().
 
@@ -55,12 +55,14 @@ writer_loop() ->
   end.
 
 %%Loop that handle input
-reader_loop(ServerPid) ->
+reader_loop(ServerPid, WriterPid) ->
   Input = string:strip(io:get_line(""), both, $\n),
   case Input of
     "exit" -> gen_server:call(ServerPid, shutdown);
     _ -> gen_server:call(ServerPid, {send, Input}),
-      reader_loop(ServerPid)
+      io:format(os:cmd(clear)),
+      print_history(WriterPid),
+      reader_loop(ServerPid, WriterPid)
   end.
 
 
