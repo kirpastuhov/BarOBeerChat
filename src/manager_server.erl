@@ -158,12 +158,11 @@ do(Q) ->
 
 generate_chat_id() ->
 
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-  %% TODO Paul Генерировать случайную строку из 6 символов %%
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-  ChatId = "",
-  ChatId.
+  ChatId = binary_to_list(base64:encode(crypto:strong_rand_bytes(6))),
+  case check_chat_if_exists(ChatId) of
+    true -> generate_chat_id();
+    false -> ChatId
+  end.
 
 check_login(Login, Password) ->
 
