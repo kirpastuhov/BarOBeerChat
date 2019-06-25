@@ -117,8 +117,6 @@ handle_connection(Socket) ->
 create_chatroom() ->
   ChatId = generate_chat_id(),
 
-  Val = check_chat_if_exists(ChatId),
-
   %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   %% TODO Kirill Сохранение ид чата в бд  %%
   %%Не забудь проверить, что такого id нет%%
@@ -153,9 +151,11 @@ check_chat_if_exists(ChatId) ->
 
 generate_chat_id() ->
 
-     ChatId = base64:encode(crypto:strong_rand_bytes(6)),
-
-  ChatId.
+  ChatId = base64:encode(crypto:strong_rand_bytes(6)),
+  case check_chat_if_exists(ChatId) of
+    true -> generate_chat_id();
+    false -> ChatId
+  end.
 
 check_login(Login, Password) ->
 
