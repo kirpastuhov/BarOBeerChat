@@ -117,8 +117,11 @@ handle_connection(Socket) ->
 create_chatroom() ->
   ChatId = generate_chat_id(),
 
+  Val = check_chat_if_exists(ChatId),
+
   %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-  %% TODO Kirill Сохранение ид чата в бд %%
+  %% TODO Kirill Сохранение ид чата в бд  %%
+  %%Не забудь проверить, что такого id нет%%
   %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
   ChatId.
@@ -150,11 +153,8 @@ check_chat_if_exists(ChatId) ->
 
 generate_chat_id() ->
 
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-  %% TODO Paul Генерировать случайную строку из 6 символов %%
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+     ChatId = base64:encode(crypto:strong_rand_bytes(6)),
 
-  ChatId = "",
   ChatId.
 
 check_login(Login, Password) ->
