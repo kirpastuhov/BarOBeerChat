@@ -145,13 +145,13 @@ check_chat_if_exists(ChatId) ->
   %% TODO Kirill Проверять если такой чат в бд %%
   %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-  Val = true,
+  Val = false,
   Val.
 
 
 generate_chat_id() ->
 
-  ChatId = base64:encode(crypto:strong_rand_bytes(6)),
+  ChatId = binary_to_list(base64:encode(crypto:strong_rand_bytes(6))),
   case check_chat_if_exists(ChatId) of
     true -> generate_chat_id();
     false -> ChatId
