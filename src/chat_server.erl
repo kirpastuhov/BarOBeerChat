@@ -62,7 +62,7 @@ start_link({Username, WriterPid, Clients}) ->
 init([Username, WriterPid, Clients]) ->
   if
     length(Clients) /= 1 ->
-      join( Clients);
+      join(Clients);
     true -> ok
   end,
   {ok, #state{name = Username, writer = WriterPid, clients = Clients}}.
@@ -90,7 +90,7 @@ handle_call({send, Message}, _From, State) ->
 
 handle_call({joined, Client}, _From, State) ->
   {Tag, Username, WriterPid, Clients} = State,
-  {Guest, _, _} = Client,
+  {Guest, _, _, _} = Client,
   WriterPid ! {message, {Guest, "joined"}},
   send_clients_list(Client, Clients),
   NewState = {Tag, Username, WriterPid, [Client | Clients]},
@@ -98,7 +98,7 @@ handle_call({joined, Client}, _From, State) ->
 
 handle_call({left, Client}, _From, State) ->
   {Tag, Username, WriterPid, Clients} = State,
-  {Guest, _, _} = Client,
+  {Guest, _, _, _} = Client,
   WriterPid ! {message, {Guest, "left"}},
   NewClients = lists:delete(Client, Clients),
   NewState = {Tag, Username, WriterPid, NewClients},
@@ -120,10 +120,14 @@ handle_call(shutdown, _From, State) ->
   {stop, normal, ok, State};
 
 
-handle_call({print, Username, Message}, _From, State) ->
+handle_call({print, Username, Message, PrivateKey}, _From, State) ->
   {_, _, WriterPid, _} = State,
-  %% TODO create fun that saves messages
   save_message({Username, Message}),
+
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  %% TODO Paul decode message по PrivateKey %%
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
   WriterPid ! {message, {Username, Message}},
   {reply, ok, State};
 
@@ -200,25 +204,30 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 
 safe_send(Client, Term) ->
-  {Username,Host, Port} = Client,
+  {Username,Host, Port, PublicKey} = Client,
   case gen_tcp:connect(Host, Port, [binary, {active, true}, {packet, raw}]) of
     {ok, Socket} ->
       gen_tcp:send(Socket, term_to_binary(Term)),
       gen_tcp:close(Socket);
-    {error, _} -> spawn_link(?MODULE, found_dead_client, [{Username, Host, Port}, self()])
+    {error, _} -> spawn_link(?MODULE, found_dead_client, [{Username, Host, Port, PublicKey}, self()])
   end.
 
 send_message({Name, Message, State}) ->
   Clients = State#state.clients,
   F = fun(Client) ->
+
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %% TODO Paul Получить из Client публичный ключ, вызвать функцию шифровки %%
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
     Msg = {message, Name, Message},
     safe_send(Client, Msg)
       end,
   lists:map(F, Clients),
   ok.
 
-found_dead_client({Username, Host, Port}, ServerPid) ->
-  gen_server:call(ServerPid, {left, {Username, Host, Port}}).
+found_dead_client({Username, Host, Port, PublicKey}, ServerPid) ->
+  gen_server:call(ServerPid, {left, {Username, Host, Port, PublicKey}}).
 
 save_message({Name, Message}) ->
 
