@@ -174,12 +174,22 @@ generate_chat_id() ->
 check_login(Login, Password) ->
 
   User = do(qlc:q([{ X#user.login, X#user.password } || X <- mnesia:table(user),
-                       X#user.login =:= Login, X#user.password =:= Password ])),
-  Status = if
-    User =:= [] -> {wrong_input};
-    true -> {ok}
-  end,
+                       X#user.login =:= Login])),
+  Status = if 
+    User =:= [] -> {not_found};
+    true ->
+     [{_, DBPassword}] = User,
+            if
+              Password /= DBPassword -> {wrong_password};
+              true -> {ok}
+            end
+        end,
   Status.
+  % Status = if
+  %   User =:= [] -> {wrong_input};
+  %   true -> {ok}
+  % end,
+  % Status.
 
 
 register_new_user(Login, Password) ->
