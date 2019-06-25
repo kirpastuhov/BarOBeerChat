@@ -21,15 +21,16 @@
 
 -export([init/0, writer_loop/0, reader_loop/2, tcp_receiver_loop/2, accept/2, handle_connection/2]).
 
-start([UsernameArg, PortArg, AddressArg, RemotePortArg]) ->
+start([UsernameArg, PortArg, RemoteNodeName, AddressArg, RemotePortArg]) ->
 
   Username = atom_to_list(UsernameArg),
   LocalPort = list_to_integer(atom_to_list(PortArg)),
+  RemoteUsername = atom_to_list(RemoteNodeName),
   RemoteAddress = atom_to_list(AddressArg),
   RemotePort = list_to_integer(atom_to_list(RemotePortArg)),
   LocalAddress = "localhost",
 
-  main(Username, [{RemoteAddress, RemotePort}, {LocalAddress, LocalPort}]);
+  main(Username, [{RemoteUsername,RemoteAddress, RemotePort}, {Username,LocalAddress, LocalPort}]);
 
 
 start([UsernameArg, PortArg]) ->
@@ -37,7 +38,7 @@ start([UsernameArg, PortArg]) ->
   LocalPort = list_to_integer(atom_to_list(PortArg)),
   LocalAddress = "localhost",
 
-  main(Username, [{LocalAddress, LocalPort}]).
+  main(Username, [{Username,LocalAddress, LocalPort}]).
 
 
 main(Username, Clients) ->
@@ -46,7 +47,7 @@ main(Username, Clients) ->
   WriterPid = spawn_link(?MODULE, writer_loop, []),
 
   [ThisClient | _] = lists:reverse(Clients),
-  {_, LocalPort} = ThisClient,
+  {_, _, LocalPort} = ThisClient,
 
 %% Gen_server
   {ok, ServerPid} = chat_server:start_link({Username, WriterPid, Clients}),
