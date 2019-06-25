@@ -9,6 +9,8 @@
 -module(manager_server).
 -author("User").
 
+-include_lib("stdlib/include/qlc.hrl").
+
 -record(chatroom, {chat_id :: term(), client = [] :: term()}).
 
 -record(user, {login :: term(), password :: term()}).
@@ -115,13 +117,11 @@ handle_connection(Socket) ->
   end.
 
 create_chatroom() ->
+
   ChatId = generate_chat_id(),
-
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-  %% TODO Kirill Сохранение ид чата в бд  %%
-  %%Не забудь проверить, что такого id нет%%
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
+  Row = #chatroom{chat_id = ChatId},
+  F = fun() -> mnesia:write(Row) end,
+  mnesia:transaction(F),
   ChatId.
 
 connect_user_to_chat(ChatId, {Username, Address, Port}) ->
@@ -139,14 +139,21 @@ connect_user_to_chat(ChatId, {Username, Address, Port}) ->
 
   send_term({Address, Port}, {connect, User}).
 
+
 check_chat_if_exists(ChatId) ->
 
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-  %% TODO Kirill Проверять если такой чат в бд %%
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-  Val = false,
+  Res = do(qlc:q([X#chatroom.chat_id || X <- mnesia:table(chatroom), X#chatroom.chat_id =:= ChatId ])),
+  Val = if
+    Res /= [ChatId] -> false;
+    true -> true
+  end,
   Val.
+
+
+do(Q) ->
+    F = fun () -> qlc:e(Q) end,
+    {atomic, Val} = mnesia:transaction(F),
+    Val.
 
 
 generate_chat_id() ->
