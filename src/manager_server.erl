@@ -15,7 +15,6 @@
 
 -record(user, {login :: term(), password :: term()}).
 
-
 %% API
 -export([start/1]).
 
@@ -23,7 +22,6 @@
 
 
 start([PortArg]) ->
-
   Port = list_to_integer(atom_to_list(PortArg)),
 
   init_database(),
@@ -63,6 +61,7 @@ init_database() ->
 
   mnesia:wait_for_tables([chatroom, user], 20000).
 
+
 tcp_receiver_loop(Port) ->
   {ok, ListenSocket} = gen_tcp:listen(Port, [binary, {active, false}, {packet, raw}]),
   spawn(?MODULE, accept, [ListenSocket]),
@@ -74,6 +73,7 @@ accept(ListenSocket) ->
   {ok, Socket} = gen_tcp:accept(ListenSocket),
   spawn(?MODULE, handle_connection, [Socket]),
   accept(ListenSocket).
+
 
 handle_connection(Socket) ->
   case gen_tcp:recv(Socket, 0, 10000) of
@@ -103,7 +103,6 @@ handle_connection(Socket) ->
             {ok} -> send_term(Client, {success});
             {login_in_use} -> send_term(Client, {in_use})
           end
-
       end,
       gen_tcp:close(Socket);
 
@@ -116,32 +115,29 @@ handle_connection(Socket) ->
 
   end.
 
-create_chatroom() ->
 
+create_chatroom() ->
   ChatId = generate_chat_id(),
   Row = #chatroom{chat_id = ChatId},
   F = fun() -> mnesia:write(Row) end,
   mnesia:transaction(F),
   ChatId.
 
-connect_user_to_chat(ChatId, {Username, Address, Port}) ->
 
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-  %% TODO Kirill Добавлять активного юзера в список юзеров для токена %%
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+connect_user_to_chat(ChatId, {Username, Address, Port, PublicKey}) ->
+  [{_, UsrList}] = do(qlc:q([{X#chatroom.chat_id,X#chatroom.client}|| X <- mnesia:table(chatroom), X#chatroom.chat_id =:= ChatId ])),
+  NewUsrList = UsrList ++ [{Username, Address, Port, PublicKey}],  % Обновленный список пользователей
+  Row = #chatroom{chat_id = ChatId, client = NewUsrList},          % Сохраняем его в бд
+  F = fun() -> mnesia:write(Row) end,
+  mnesia:transaction(F),
+  if length(UsrList) =:= 0 -> 
+    send_term({Address, Port}, {connect, ChatId});
+    true ->  User = hd(UsrList),
+    send_term({Address, Port}, {connect, ChatId, User})
+  end.
 
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-  %% TODO Kirill Возвращать список/одного активного юзера чата    %%
-  %% Записывай его в переменную User ниже; User = {Address, Port} %%
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-  User = {},
-
-  send_term({Address, Port}, {connect, User}).
-
-
+  
 check_chat_if_exists(ChatId) ->
-
   Res = do(qlc:q([X#chatroom.chat_id || X <- mnesia:table(chatroom), X#chatroom.chat_id =:= ChatId ])),
   Val = if
     Res /= [ChatId] -> false;
@@ -157,41 +153,37 @@ do(Q) ->
 
 
 generate_chat_id() ->
-
   ChatId = binary_to_list(base64:encode(crypto:strong_rand_bytes(6))),
   case check_chat_if_exists(ChatId) of
     true -> generate_chat_id();
     false -> ChatId
   end.
 
+
 check_login(Login, Password) ->
-
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-  %% TODO Kirill Получить логин и пароль из бд %%
-  %% User = {Login, Password}                  %%
-  %% Если нет, в статус записывай {not_found}  %%
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-  User = {},
-
-
-  {_, DBPassword} = User,
-  Status = if
-             Password /= DBPassword -> {wrong_password};
-             true -> {ok}
-           end,
+  User = do(qlc:q([{ X#user.login, X#user.password } || X <- mnesia:table(user),
+                       X#user.login =:= Login])),
+  Status = if 
+    User =:= [] -> {not_found};
+    true ->
+     [{_, DBPassword}] = User,
+      if
+        Password /= DBPassword -> {wrong_password};
+        true -> {ok}
+          end
+      end,
   Status.
 
 
 register_new_user(Login, Password) ->
-
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-  %% TODO Kirill Вносить в бд нового юзера  %%
-  %% Перед этим проверять не занят ли логин %%
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-  Status = {ok}, %% или {login_in_use}
-
+  DBLogin = do(qlc:q([{ X#user.login} || X <- mnesia:table(user), X#user.login =:= Login ])),
+  if
+    DBLogin =:= [{Login}] -> Status = {login_in_use};
+    true -> Status = {ok},
+      Row = #user{login = Login, password = Password},
+      F = fun() -> mnesia:write(Row) end,
+      mnesia:transaction(F)
+  end,
   Status.
 
 
