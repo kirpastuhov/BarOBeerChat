@@ -123,9 +123,7 @@ authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort) ->
 
 connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort) ->
 
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-  %% TODO Paul Generate Public and Private Keys %%
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 
   {PublicKey, PrivateKey} = generateKeys(),
 
@@ -338,7 +336,5 @@ init() ->
 
 
 generateKeys() ->
-  PublicKey = "1",
-  PrivateKey = "1",
 
-  {PublicKey, PrivateKey}.
+    {_PublicKey, _PrivateKey} = crypto:generate_key(rsa, {2048, 257}).
