@@ -122,15 +122,13 @@ handle_call(shutdown, _From, State) ->
 
 handle_call({print, Username, Message, PrivateKey}, _From, State) ->
   {_, _, WriterPid, _} = State,
-  save_message({Username, Message}),
-
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-  %% TODO Paul decode message по PrivateKey %%
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
   DecryptedMessage = crypto:private_decrypt(rsa, Message, PrivateKey, rsa_pkcs1_padding),
 
-  WriterPid ! {message, {Username, DecryptedMessage}},
+  save_message({Username, DecryptedMessage}),
+
+
+  WriterPid ! {message, {Username, binary_to_list(DecryptedMessage)}},
   {reply, ok, State};
 
 
@@ -220,7 +218,8 @@ send_message({Name, Message, State}) ->
 
 
     {_, _, _, PublicKey} = Client,
-    CryptoMessage = crypto:public_encrypt(rsa, Message, PublicKey, rsa_pkcs1_padding),
+
+    CryptoMessage = crypto:public_encrypt(rsa, list_to_binary(Message), PublicKey, rsa_pkcs1_padding),
 
     Msg = {message, Name, CryptoMessage},
     safe_send(Client, Msg)
