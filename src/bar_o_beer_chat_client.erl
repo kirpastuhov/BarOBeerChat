@@ -19,7 +19,7 @@
 %% API
 -export([start/1]).
 
--export([init/1, writer_loop/0, reader_loop/2, tcp_receiver_loop/4, accept/4, handle_connection/4]).
+-export([init/1, writer_loop/0, reader_loop/3, tcp_receiver_loop/4, accept/4, handle_connection/4]).
 
 start([PortArg, ServerAddressArg, ServerPortArg]) ->
 
@@ -28,7 +28,7 @@ start([PortArg, ServerAddressArg, ServerPortArg]) ->
   LocalPort = list_to_integer(atom_to_list(PortArg)),
   LocalAddress = "localhost",
 
-  %io:format(os:cmd(clear)),
+  io:format(os:cmd(clear)),
   io:format("Welcome to the BarOBeerChat!~n~n"),
   io:format("Type register <Username> <Password> to sign up~nType login <Username> <Password> to sign in~n~n"),
 
@@ -61,7 +61,7 @@ authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort) ->
               case Reply of
 
                 {success} ->
-                  %io:format(os:cmd(clear)),
+                  io:format(os:cmd(clear)),
                   io:format("Hello, ~s!~n~nTo create new chat type 'create'~nTo connect to existing one type 'connect <chat_id>'~n~n", [Username]),
                   connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort);
 
@@ -93,7 +93,7 @@ authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort) ->
               case Reply of
 
                 {success} ->
-                  %io:format(os:cmd(clear)),
+                  io:format(os:cmd(clear)),
                   io:format("Hello, ~s!~n~nTo create new chat type 'create'~nTo connect to existing one type 'connect <chat_id>'~n~n", [Username]),
                   connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort);
 
@@ -147,7 +147,7 @@ connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort) 
               case Reply of
 
                 {connect, ChatId} ->
-                  %io:format(os:cmd(clear)),
+                  io:format(os:cmd(clear)),
                   main(Username, ChatId, [{Username, LocalAddress, LocalPort, PublicKey}], PrivateKey),
                   send_term({ServerAddress, ServerPort}, {left, ThisUser, ChatId})
 
@@ -178,12 +178,12 @@ connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort) 
                 {connect, GotChatId, RemoteUsers} ->
                   [{RemoteUsername, Address, Port, _} | _] = RemoteUsers,
                   io:format("Connecting to ~s - ~p:~p~n", [RemoteUsername, Address, Port]),
-                  %io:format(os:cmd(clear)),
+                  io:format(os:cmd(clear)),
                   main(Username, GotChatId, lists:reverse([{Username, LocalAddress, LocalPort, PublicKey}] ++ RemoteUsers), PrivateKey),
                   send_term({ServerAddress, ServerPort}, {left, ThisUser, GotChatId});
 
                 {connect, GotChatId} ->
-                  %io:format(os:cmd(clear)),
+                  io:format(os:cmd(clear)),
                   main(Username, GotChatId, [{Username, LocalAddress, LocalPort, PublicKey}], PrivateKey),
                   send_term({ServerAddress, ServerPort}, {left, ThisUser, GotChatId});
 
@@ -233,7 +233,7 @@ main(Username, ChatId, Clients, PrivateKey) ->
   spawn_link(?MODULE, tcp_receiver_loop, [ServerPid, LocalPort, PrivateKey, ChatId]),
 
 %% Process that handle input
-  reader_loop(ServerPid, WriterPid).
+  reader_loop(ServerPid, WriterPid, ChatId).
 
 %%Loop that prints incoming messages
 writer_loop() ->
@@ -246,14 +246,14 @@ writer_loop() ->
   end.
 
 %%Loop that handle input
-reader_loop(ServerPid, WriterPid) ->
+reader_loop(ServerPid, WriterPid, ChatId) ->
   Input = string:strip(io:get_line(""), both, $\n),
   case Input of
     "exit" -> gen_server:call(ServerPid, shutdown);
     _ -> gen_server:call(ServerPid, {send, Input}),
-%%      io:format(os:cmd(clear)),
-%%      print_history(WriterPid),
-      reader_loop(ServerPid, WriterPid)
+      io:format(os:cmd(clear)),
+      print_history(ChatId, WriterPid),
+      reader_loop(ServerPid, WriterPid, ChatId)
   end.
 
 
