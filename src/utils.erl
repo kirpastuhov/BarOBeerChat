@@ -9,8 +9,9 @@
 -module(utils).
 -author("User").
 
+
 %% API
--export([send_term/2]).
+-export([send_term/2, generate_chars_and_numbers/1]).
 
 
 send_term({Address, Port}, Term) ->
@@ -20,3 +21,13 @@ send_term({Address, Port}, Term) ->
       {ok, Socket};
     {error, Reason} -> {error, Reason}
   end.
+
+
+generate_chars_and_numbers(Length) -> generate_random_string(Length, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890").
+
+generate_random_string(Length, AllowedChars) ->
+  MaxLength = length(AllowedChars),
+  lists:foldl(
+    fun(_, Acc) -> [lists:nth(rand:uniform(MaxLength), AllowedChars)] ++ Acc end,
+    [], lists:seq(1, Length)
+  ).
