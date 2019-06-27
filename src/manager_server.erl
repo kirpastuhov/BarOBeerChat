@@ -149,33 +149,23 @@ connect_user_to_chat(ChatId, {Username, Address, Port, PublicKey}) ->
   [{_, UsrList}] = do(qlc:q([{X#chatroom.chat_id, X#chatroom.client} || X <- mnesia:table(chatroom), X#chatroom.chat_id =:= ChatId])),
 
   NewUser = {Username, Address, Port, PublicKey},
-  Val = lists:member(NewUser, UsrList),
-
-  NewUsrList = if
-                 Val -> UsrList;
-                 true -> UsrList ++ [NewUser]
-               end,
+  FixedUsrList = delete_user_by_username(Username, UsrList),
+  NewUsrList = FixedUsrList ++ [NewUser],
 
   Row = #chatroom{chat_id = ChatId, client = NewUsrList},          % Сохраняем его в бд
   F = fun() -> mnesia:write(Row) end,
   mnesia:transaction(F),
   if
-    length(UsrList) =:= 0 ->
+    length(FixedUsrList) =:= 0 ->
       {connect, ChatId};
-    true -> User = hd(UsrList),
+    true -> User = hd(FixedUsrList),
       {connect, ChatId, [User]}
   end.
 
 delete_client_from_chat(Client, ChatId) ->
   [{_, UsrList}] = do(qlc:q([{X#chatroom.chat_id, X#chatroom.client} || X <- mnesia:table(chatroom), X#chatroom.chat_id =:= ChatId])),
-  Val = lists:member(Client, UsrList),
-  NewUserList =
-    if
-      Val ->
-        lists:delete(Client, UsrList);
-      true ->
-        UsrList
-    end,
+  {Username, _, _, _} = Client,
+  NewUserList = delete_user_by_username(Username, UsrList),
   Row = #chatroom{chat_id = ChatId, client = NewUserList},          % Сохраняем его в бд
   F = fun() -> mnesia:write(Row) end,
   mnesia:transaction(F).
@@ -238,3 +228,14 @@ reader_loop() ->
     "exit" -> ok;
     _ -> reader_loop()
   end.
+
+delete_user_by_username(Username, Users) ->
+  F = fun(User, Acc) ->
+    {Name, _, _, _} = User,
+    NewAcc = if
+               Name /= Username -> Acc ++ [User];
+               true -> Acc
+             end,
+      NewAcc
+    end,
+  lists:foldl(F, [], Users).
