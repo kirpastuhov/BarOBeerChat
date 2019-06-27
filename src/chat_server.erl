@@ -122,13 +122,13 @@ handle_call(shutdown, _From, State) ->
 
 handle_call({print, Username, Message, PrivateKey}, _From, State) ->
   {_, _, WriterPid, _} = State,
-  save_message({Username, Message}),
 
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-  %% TODO Paul decode message по PrivateKey %%
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  DecryptedMessage = crypto:private_decrypt(rsa, Message, PrivateKey, rsa_pkcs1_padding),
 
-  WriterPid ! {message, {Username, Message}},
+  save_message({Username, DecryptedMessage}),
+
+
+  WriterPid ! {message, {Username, binary_to_list(DecryptedMessage)}},
   {reply, ok, State};
 
 
@@ -204,7 +204,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 
 safe_send(Client, Term) ->
-  {Username,Host, Port, PublicKey} = Client,
+  {Username, Host, Port, PublicKey} = Client,
   case gen_tcp:connect(Host, Port, [binary, {active, true}, {packet, raw}]) of
     {ok, Socket} ->
       gen_tcp:send(Socket, term_to_binary(Term)),
@@ -216,11 +216,12 @@ send_message({Name, Message, State}) ->
   Clients = State#state.clients,
   F = fun(Client) ->
 
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    %% TODO Paul Получить из Client публичный ключ, вызвать функцию шифровки %%
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-    Msg = {message, Name, Message},
+    {_, _, _, PublicKey} = Client,
+
+    CryptoMessage = crypto:public_encrypt(rsa, list_to_binary(Message), PublicKey, rsa_pkcs1_padding),
+
+    Msg = {message, Name, CryptoMessage},
     safe_send(Client, Msg)
       end,
   lists:map(F, Clients),

@@ -14,67 +14,227 @@
 -record(message, {msg_id, name, message}).
 
 -import(chat_server, [start_link/1]).
-
+-import(utils, [send_term/2]).
 
 %% API
 -export([start/1]).
 
 -export([init/0, writer_loop/0, reader_loop/2, tcp_receiver_loop/3, accept/3, handle_connection/3]).
 
-start([UsernameArg, PortArg, RemoteNodeName, AddressArg, RemotePortArg, PublicKeyArg]) ->
+start([PortArg, ServerAddressArg, ServerPortArg]) ->
 
-  Username = atom_to_list(UsernameArg),
-  LocalPort = list_to_integer(atom_to_list(PortArg)),
-  RemoteUsername = atom_to_list(RemoteNodeName),
-  RemoteAddress = atom_to_list(AddressArg),
-  RemotePort = list_to_integer(atom_to_list(RemotePortArg)),
-  RemotePublicKey = atom_to_list(PublicKeyArg),
-  LocalAddress = "localhost",
-
-  main(Username, [{RemoteUsername,RemoteAddress, RemotePort, RemotePublicKey}, {Username,LocalAddress, LocalPort}]);
-
-
-start([UsernameArg, PortArg]) ->
-  Username = atom_to_list(UsernameArg),
+  ServerAddress = atom_to_list(ServerAddressArg),
+  ServerPort = list_to_integer(atom_to_list(ServerPortArg)),
   LocalPort = list_to_integer(atom_to_list(PortArg)),
   LocalAddress = "localhost",
 
-  main(Username, [{Username,LocalAddress, LocalPort}]).
+  %io:format(os:cmd(clear)),
+  io:format("Welcome to the BarOBeerChat!~n~n"),
+  io:format("Type register <Username> <Password> to sign up~nType login <Username> <Password> to sign in~n~n"),
 
 
-main(Username, Clients) ->
+  authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort),
+
+  io:format("~nBye!~n"),
+
+  init:stop().
+
+authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort) ->
+
+  Input = string:strip(io:get_line(""), both, $\n),
+  List = string:split(Input, " ", all),
+
+  case List of
+
+
+    ["register", Username, Password] ->
+      io:format("Connecting to server...~n"),
+      case send_term({ServerAddress, ServerPort}, {register, Username, Password}) of
+
+        {ok, _} ->
+
+          receive
+
+            {tcp, _Socket, Msg} ->
+              Reply = binary_to_term(Msg),
+
+              case Reply of
+
+                {success} ->
+                  %io:format(os:cmd(clear)),
+                  io:format("Hello, ~s!~n~nTo create new chat type 'create'~nTo connect to existing one type 'connect <chat_id>'~n~n", [Username]),
+                  connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort);
+
+                {in_use} ->
+                  io:format("This username is in use, try another~n"),
+                  authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort)
+              end
+
+          after 2000 ->
+            io:format("Server is not responding, but you can try once more~n"),
+            authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort)
+          end;
+
+        {error, _Reason} -> io:format("Connection failed, but you could try again~n"),
+          authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort)
+      end;
+
+
+    ["login", Username, Password] ->
+      io:format("Connecting to server...~n"),
+      case send_term({ServerAddress, ServerPort}, {login, Username, Password}) of
+
+        {ok, _} ->
+
+          receive
+            {tcp, _Socket, Msg} ->
+              Reply = binary_to_term(Msg),
+
+              case Reply of
+
+                {success} ->
+                  %io:format(os:cmd(clear)),
+                  io:format("Hello, ~s!~n~nTo create new chat type 'create'~nTo connect to existing one type 'connect <chat_id>'~n~n", [Username]),
+                  connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort);
+
+                {not_found} ->
+                  io:format("This username is not found~n"),
+                  authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort);
+
+                {wrong_password} ->
+                  io:format("Wrong password~n"),
+                  authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort)
+              end
+
+          after 2000 ->
+            io:format("Server is not responding, but you can try once more~n"),
+            authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort)
+          end;
+
+        {error, _Reason} -> io:format("Connection failed, but you could try again~n"),
+          authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort)
+      end;
+
+    ["exit"] -> ok;
+    _ ->
+      io:format("Unknown command~n"),
+      authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort)
+  end.
+
+connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort) ->
+
+
+
+  {PublicKey, PrivateKey} = generateKeys(),
+
+  ThisUser = {Username, LocalAddress, LocalPort, PublicKey},
+
+  Input = string:strip(io:get_line(""), both, $\n),
+  List = string:split(Input, " ", all),
+
+  case List of
+
+    ["create"] ->
+      io:format("Connecting to server...~n"),
+      case send_term({ServerAddress, ServerPort}, {create, ThisUser}) of
+
+        {ok, _} ->
+
+          receive
+            {tcp, _Socket, Msg} ->
+              Reply = binary_to_term(Msg),
+
+              case Reply of
+
+                {connect, ChatId} ->
+                  io:format("Kinda got to chat ~p~n", [ChatId]),
+                  %io:format(os:cmd(clear)),
+                  main(Username, ChatId, [{Username, LocalAddress, LocalPort, PublicKey}], PrivateKey),
+                  send_term({ServerAddress, ServerPort}, {left, ThisUser, ChatId})
+
+              end
+
+          after 2000 ->
+            io:format("Server is not responding, but you can try once more~n"),
+            connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort)
+          end;
+
+        {error, _Reason} -> io:format("Connection failed, but you could try again~n"),
+          connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort)
+      end;
+
+
+    ["connect", ChatId] ->
+      io:format("Connecting to server...~n"),
+      case send_term({ServerAddress, ServerPort}, {connect, ChatId, ThisUser}) of
+
+        {ok, _} ->
+
+          receive
+            {tcp, _Socket, Msg} ->
+              Reply = binary_to_term(Msg),
+
+              case Reply of
+
+                {connect, GotChatId, RemoteUser} ->
+                  io:format("Kinda got to chat ~p and connected to ~p~n", [GotChatId, RemoteUser]),
+                  %io:format(os:cmd(clear)),
+                  main(Username, GotChatId, lists:reverse([{Username, LocalAddress, LocalPort, PublicKey}] ++ RemoteUser), PrivateKey),
+                  send_term({ServerAddress, ServerPort}, {left, ThisUser, GotChatId});
+
+                {connect, GotChatId} ->
+                  io:format("Kinda got to chat ~p~n", [GotChatId]),
+                  %io:format(os:cmd(clear)),
+                  main(Username, GotChatId, [{Username, LocalAddress, LocalPort, PublicKey}], PrivateKey),
+                  send_term({ServerAddress, ServerPort}, {left, ThisUser, GotChatId});
+
+                {not_found} ->
+                  io:format("Chat not found~n"),
+                  connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort);
+
+                Reply ->
+                  io:format("Reply: ~p~n", [Reply])
+
+              end
+
+          after 2000 ->
+            io:format("Server is not responding, but you can try once more~n"),
+            connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort)
+          end;
+
+        {error, _Reason} -> io:format("Connection failed, but you could try again~n"),
+          connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort)
+      end;
+
+
+    ["exit", ChatId] -> send_term({ServerAddress, ServerPort}, {left, ThisUser, ChatId}),
+      connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort);
+
+    ["exit"] -> ok;
+    _ ->
+      io:format("Unknown command~n"),
+      connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort)
+  end.
+
+main(Username, _ChatId, Clients, PrivateKey) ->
   init(),
 %% Process that handle incoming messages
   WriterPid = spawn_link(?MODULE, writer_loop, []),
 
-
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-  %% TODO Paul Generate Public and Private Keys %%
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-  {PublicKey, PrivateKey} = generateKeys(),
-
-
-  [ThisClient | RestClients] = lists:reverse(Clients),
-  {ClientName, LocalAddress, LocalPort} = ThisClient,
-  ThisNewClient = {ClientName, LocalAddress, LocalPort, PublicKey},
-
-  NewClientList = lists:reverse([ThisNewClient | RestClients]),
+  [ThisClient | _] = lists:reverse(Clients),
+  {_, _, LocalPort, _} = ThisClient,
 
 %% Gen_server
-  {ok, ServerPid} = chat_server:start_link({Username, WriterPid, NewClientList}),
+  {ok, ServerPid} = chat_server:start_link({Username, WriterPid, Clients}),
 
   %%prints local history (for a start)
   print_history(WriterPid),
 
 
-
   spawn_link(?MODULE, tcp_receiver_loop, [ServerPid, LocalPort, PrivateKey]),
 
 %% Process that handle input
-  reader_loop(ServerPid, WriterPid),
-
-  init:stop().
+  reader_loop(ServerPid, WriterPid).
 
 %%Loop that prints incoming messages
 writer_loop() ->
@@ -176,7 +336,5 @@ init() ->
 
 
 generateKeys() ->
-  PublicKey = "1",
-  PrivateKey = "1",
 
-  {PublicKey, PrivateKey}.
+    {_PublicKey, _PrivateKey} = crypto:generate_key(rsa, {2048, 257}).
