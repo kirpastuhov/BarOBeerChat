@@ -147,7 +147,6 @@ connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort) 
               case Reply of
 
                 {connect, ChatId} ->
-                  io:format("Kinda got to chat ~p~n", [ChatId]),
                   %io:format(os:cmd(clear)),
                   main(Username, ChatId, [{Username, LocalAddress, LocalPort, PublicKey}], PrivateKey),
                   send_term({ServerAddress, ServerPort}, {left, ThisUser, ChatId})
@@ -176,14 +175,14 @@ connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort) 
 
               case Reply of
 
-                {connect, GotChatId, RemoteUser} ->
-                  io:format("Kinda got to chat ~p and connected to ~p~n", [GotChatId, RemoteUser]),
+                {connect, GotChatId, RemoteUsers} ->
+                  [{RemoteUsername, Address, Port, _} | _] = RemoteUsers,
+                  io:format("Connecting to ~s - ~p:~p~n", [RemoteUsername, Address, Port]),
                   %io:format(os:cmd(clear)),
-                  main(Username, GotChatId, lists:reverse([{Username, LocalAddress, LocalPort, PublicKey}] ++ RemoteUser), PrivateKey),
+                  main(Username, GotChatId, lists:reverse([{Username, LocalAddress, LocalPort, PublicKey}] ++ RemoteUsers), PrivateKey),
                   send_term({ServerAddress, ServerPort}, {left, ThisUser, GotChatId});
 
                 {connect, GotChatId} ->
-                  io:format("Kinda got to chat ~p~n", [GotChatId]),
                   %io:format(os:cmd(clear)),
                   main(Username, GotChatId, [{Username, LocalAddress, LocalPort, PublicKey}], PrivateKey),
                   send_term({ServerAddress, ServerPort}, {left, ThisUser, GotChatId});
