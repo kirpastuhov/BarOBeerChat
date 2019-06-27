@@ -11,6 +11,8 @@
 
 -include_lib("stdlib/include/qlc.hrl").
 
+-import(utils, [generate_chars_and_numbers/1]).
+
 -record(chatroom, {chat_id :: term(), client = [] :: term()}).
 
 -record(user, {login :: term(), password :: term()}).
@@ -196,7 +198,7 @@ do(Q) ->
 
 
 generate_chat_id() ->
-  ChatId = binary_to_list(base64:encode(crypto:strong_rand_bytes(6))),
+  ChatId = utils:generate_chars_and_numbers(6),
   case check_chat_if_exists(ChatId) of
     true -> generate_chat_id();
     false -> ChatId

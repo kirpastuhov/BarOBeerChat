@@ -19,7 +19,7 @@
 %% API
 -export([start/1]).
 
--export([init/0, writer_loop/0, reader_loop/2, tcp_receiver_loop/3, accept/3, handle_connection/3]).
+-export([init/1, writer_loop/0, reader_loop/2, tcp_receiver_loop/4, accept/4, handle_connection/4]).
 
 start([PortArg, ServerAddressArg, ServerPortArg]) ->
 
@@ -216,8 +216,8 @@ connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort) 
       connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort)
   end.
 
-main(Username, _ChatId, Clients, PrivateKey) ->
-  init(),
+main(Username, ChatId, Clients, PrivateKey) ->
+  init(ChatId),
 %% Process that handle incoming messages
   WriterPid = spawn_link(?MODULE, writer_loop, []),
 
@@ -228,10 +228,10 @@ main(Username, _ChatId, Clients, PrivateKey) ->
   {ok, ServerPid} = chat_server:start_link({Username, WriterPid, Clients}),
 
   %%prints local history (for a start)
-  print_history(WriterPid),
+  print_history(ChatId, WriterPid),
 
 
-  spawn_link(?MODULE, tcp_receiver_loop, [ServerPid, LocalPort, PrivateKey]),
+  spawn_link(?MODULE, tcp_receiver_loop, [ServerPid, LocalPort, PrivateKey, ChatId]),
 
 %% Process that handle input
   reader_loop(ServerPid, WriterPid).
@@ -258,26 +258,26 @@ reader_loop(ServerPid, WriterPid) ->
   end.
 
 
-tcp_receiver_loop(ServerPid, Port, PrivateKey) ->
+tcp_receiver_loop(ServerPid, Port, PrivateKey, ChatId) ->
   {ok, ListenSocket} = gen_tcp:listen(Port, [binary, {active, false}, {packet, raw}]),
-  spawn(?MODULE, accept, [ListenSocket, ServerPid, PrivateKey]),
+  spawn(?MODULE, accept, [ListenSocket, ServerPid, PrivateKey, ChatId]),
   timer:sleep(infinity),
   ok.
 
 
 
-accept(ListenSocket, ServerPid, PrivateKey) ->
+accept(ListenSocket, ServerPid, PrivateKey, ChatId) ->
   {ok, Socket} = gen_tcp:accept(ListenSocket),
-  spawn(?MODULE, handle_connection, [Socket, ServerPid, PrivateKey]),
-  accept(ListenSocket, ServerPid, PrivateKey).
+  spawn(?MODULE, handle_connection, [Socket, ServerPid, PrivateKey, ChatId]),
+  accept(ListenSocket, ServerPid, PrivateKey, ChatId).
 
-handle_connection(Socket, ServerPid, PrivateKey) ->
+handle_connection(Socket, ServerPid, PrivateKey, ChatId) ->
   case gen_tcp:recv(Socket, 0, 10000) of
     {ok, Msg} ->
       Input = binary_to_term(Msg),
       case Input of
         {message, Username, Text} ->
-          gen_server:call(ServerPid, {print, Username, Text, PrivateKey});
+          gen_server:call(ServerPid, {print, Username, Text, PrivateKey, ChatId});
         {join, {Username, Address, Port, PublicKey}} ->
           gen_server:call(ServerPid, {joined, {Username, Address, Port, PublicKey}});
         {left, {Username, LocalAddress, LocalPort, PublicKey}} ->
@@ -307,12 +307,12 @@ do(Q, WriterPid) ->
   lists:map(Fun, Val).
 
 
-print_history(WriterPid) ->
+print_history(ChatId, WriterPid) ->
   mnesia:start(),
-  mnesia:wait_for_tables([message], 20000),
-  do(qlc:q([{X#message.name, X#message.message} || X <- mnesia:table(message)]), WriterPid).
+  mnesia:wait_for_tables([list_to_atom(ChatId)], 20000),
+  do(qlc:q([{X#message.name, X#message.message} || X <- mnesia:table(list_to_atom(ChatId))]), WriterPid).
 
-init() ->
+init(ChatId) ->
   case mnesia:create_schema([node()]) of
     {error,
       {_, {already_exists, _}}} ->
@@ -320,19 +320,19 @@ init() ->
     ok -> ok
   end,
   mnesia:start(),
-  case mnesia:create_table(message,
+  case mnesia:create_table(list_to_atom(ChatId),
     [{attributes, record_info(fields, message)},
-      {disc_copies, [node()]}, {type, ordered_set}])
+      {disc_copies, [node()]}, {type, ordered_set},
+      {record_name, message}])
   of
-    {aborted, {already_exists, message}} -> ok;
+    {aborted, {already_exists, _}} -> ok;
     {atomic, ok} ->
-      Row = #message{name = system,
-        message = " start of the chat room ", msg_id = 0},
-      F = fun() -> mnesia:write(Row) end,
+      Row = #message{name = system, message = "Welcome to chat " ++ ChatId, msg_id = 0},
+      F = fun() -> mnesia:write(list_to_atom(ChatId),Row, write) end,
       mnesia:transaction(F),
       ok
   end,
-  mnesia:wait_for_tables([message], 20000).
+  mnesia:wait_for_tables([list_to_atom(ChatId)], 20000).
 
 
 generateKeys() ->

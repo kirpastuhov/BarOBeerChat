@@ -120,12 +120,12 @@ handle_call(shutdown, _From, State) ->
   {stop, normal, ok, State};
 
 
-handle_call({print, Username, Message, PrivateKey}, _From, State) ->
+handle_call({print, Username, Message, PrivateKey, ChatId}, _From, State) ->
   {_, _, WriterPid, _} = State,
 
   DecryptedMessage = crypto:private_decrypt(rsa, Message, PrivateKey, rsa_pkcs1_padding),
 
-  save_message({Username, DecryptedMessage}),
+  save_message(ChatId, {Username, DecryptedMessage}),
 
 
   WriterPid ! {message, {Username, binary_to_list(DecryptedMessage)}},
@@ -230,11 +230,11 @@ send_message({Name, Message, State}) ->
 found_dead_client({Username, Host, Port, PublicKey}, ServerPid) ->
   gen_server:call(ServerPid, {left, {Username, Host, Port, PublicKey}}).
 
-save_message({Name, Message}) ->
+save_message(ChatId, {Name, Message}) ->
 
   Row = #message{name = Name, message = Message,
-    msg_id = mnesia:dirty_last(message) + 1},
-  F = fun() -> mnesia:write(Row) end,
+    msg_id = mnesia:dirty_last(list_to_atom(ChatId)) + 1},
+  F = fun() -> mnesia:write(list_to_atom(ChatId),Row, write) end,
   mnesia:transaction(F).
 
 
