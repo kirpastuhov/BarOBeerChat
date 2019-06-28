@@ -39,26 +39,30 @@ start([PortArg, ServerAddressArg, ServerPortArg]) ->
 
 
 main(Username, ChatId, Clients, PrivateKey) ->
+  %% Initialization of database of chat
   init_database(ChatId),
-%% Process that handle incoming messages
+
+  %% Process that prints incoming messages
   WriterPid = spawn_link(?MODULE, writer_loop, []),
 
   [ThisClient | _] = lists:reverse(Clients),
   {_, _, LocalPort, _} = ThisClient,
 
-%% Gen_server
+  %% Gen_server
   {ok, ServerPid} = bobc_gen_server:start_link({Username, WriterPid, Clients}),
 
-  %%prints local history (for a start)
+  %% Prints local history
   print_history(ChatId, WriterPid),
 
-
+  %% Process that listens for incoming connections
   spawn_link(bobc_net, tcp_listener_loop, [LocalPort, [?MODULE, handle_connection, ServerPid, PrivateKey, ChatId]]),
 
-%% Process that handle input
+  %% Process that handle input
   reader_loop(ServerPid, WriterPid, ChatId).
 
-%%Loop that prints incoming messages
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Waiting for messages and prints them %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 writer_loop() ->
   receive
     {message, {Username, Message}} -> io:format("<~s> ~s~n", [Username, Message]),
@@ -68,7 +72,9 @@ writer_loop() ->
       writer_loop()
   end.
 
-%%Loop that handle input
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Gets user input, send it and rewrites the console text %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 reader_loop(ServerPid, WriterPid, ChatId) ->
   Input = string:strip(io:get_line(""), both, $\n),
   case Input of
@@ -79,7 +85,11 @@ reader_loop(ServerPid, WriterPid, ChatId) ->
       reader_loop(ServerPid, WriterPid, ChatId)
   end.
 
-
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Function that handle incoming connections               %%
+%% Socket to this function comes from bobc_net module      %%
+%% All you need is to define expected requests and actions %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 handle_connection([Socket | [ServerPid | [PrivateKey | [ChatId]]]]) ->
   case gen_tcp:recv(Socket, 0, 10000) of
     {ok, Msg} ->
@@ -105,13 +115,17 @@ handle_connection([Socket | [ServerPid | [PrivateKey | [ChatId]]]]) ->
 
   end.
 
-
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Function-helper that returns the result_set of the query Q %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 do(Q) ->
   F = fun() -> qlc:e(Q) end,
   {atomic, Val} = mnesia:transaction(F),
   Val.
 
-
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Gets all messages from database and send them to output %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 print_history(ChatId, WriterPid) ->
   mnesia:start(),
   mnesia:wait_for_tables([list_to_atom(ChatId)], 20000),
@@ -122,6 +136,11 @@ print_history(ChatId, WriterPid) ->
         end,
   lists:map(Fun, Messages).
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Creates schema and database for current chat if they don't exist       %%
+%%                                                                        %%
+%% Fills the first row in the table with system message containing ChatID %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 init_database(ChatId) ->
   case mnesia:create_schema([node()]) of
     {error,
