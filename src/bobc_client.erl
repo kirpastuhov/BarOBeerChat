@@ -40,7 +40,7 @@ start([PortArg, ServerAddressArg, ServerPortArg]) ->
 
 main(Username, ChatId, Clients, PrivateKey) ->
   %% Initialization of database of chat
-  init_database(ChatId),
+  LastMsg = init_database(ChatId),
 
   %% Process that prints incoming messages
   WriterPid = spawn_link(?MODULE, writer_loop, []),
@@ -49,7 +49,7 @@ main(Username, ChatId, Clients, PrivateKey) ->
   {_, _, LocalPort, _} = ThisClient,
 
   %% Gen_server
-  {ok, ServerPid} = bobc_gen_server:start_link({Username, WriterPid, Clients}),
+  {ok, ServerPid} = bobc_gen_server:start_link({Username, LastMsg, WriterPid, Clients}),
 
   %% Prints local history
   print_history(ChatId, WriterPid),
@@ -97,11 +97,19 @@ handle_connection([Socket | [ServerPid | [PrivateKey | [ChatId]]]]) ->
       case Input of
         {message, Username, Text} ->
           gen_server:call(ServerPid, {print, Username, Text, PrivateKey, ChatId});
+        {join, {Username, Address, Port, PublicKey}, LastMsg} ->
+        %% вызов функции котоорая вернет список сообщений после LastMsg
+          Messages = get_messages_after(LastMsg, ChatId),
+          gen_server:call(ServerPid, {joined, {Username, Address, Port, PublicKey}, Messages});
         {join, {Username, Address, Port, PublicKey}} ->
           gen_server:call(ServerPid, {joined, {Username, Address, Port, PublicKey}});
         {left, {Username, LocalAddress, LocalPort, PublicKey}} ->
           gen_server:call(ServerPid, {left, {Username, LocalAddress, LocalPort, PublicKey}});
-        {client_list, Clients} ->
+        {client_list, Clients, Messages} ->
+          
+          %% записывает недостющие сообщения в бд
+          %% возвращает новое последнее сообщение
+          save_new_messages(Messages, ChatId),
           gen_server:call(ServerPid, {join, Clients})
       end,
       gen_tcp:close(Socket);
@@ -114,6 +122,22 @@ handle_connection([Socket | [ServerPid | [PrivateKey | [ChatId]]]]) ->
       gen_tcp:close(Socket)
 
   end.
+
+get_messages_after(LastMsg, ChatId) ->
+   do(qlc:q([{X#message.msg_id, X#message.name, X#message.message} || X <- mnesia:table(list_to_atom(ChatId)),
+              X#message.msg_id > LastMsg])).
+
+
+save_new_messages(Messages, ChatId) ->
+  D = fun(Message) -> 
+    F = fun() -> mnesia:write(list_to_atom(ChatId), Message, write)
+end,
+    mnesia:transaction(F)
+    end,
+    lists:map(D, Messages).
+
+
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Function-helper that returns the result_set of the query Q %%
@@ -139,7 +163,7 @@ print_history(ChatId, WriterPid) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Creates schema and database for current chat if they don't exist       %%
 %%                                                                        %%
-%% Fills the first row in the table with system message containing ChatID %%
+%% Fills the first row in the table with system message containing ChatId %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 init_database(ChatId) ->
   case mnesia:create_schema([node()]) of
@@ -156,9 +180,10 @@ init_database(ChatId) ->
   of
     {aborted, {already_exists, _}} -> ok;
     {atomic, ok} ->
-      Row = #message{name = system, message = "Welcome to chat " ++ ChatId, msg_id = 0},
+      Row = #message{name = system, message = "Welcome to chat " ++ ChatId, msg_id = calendar:datetime_to_gregorian_seconds(calendar:local_time())},
       F = fun() -> mnesia:write(list_to_atom(ChatId),Row, write) end,
       mnesia:transaction(F),
       ok
   end,
-  mnesia:wait_for_tables([list_to_atom(ChatId)], 20000).
+  mnesia:wait_for_tables([list_to_atom(ChatId)], 20000),
+  mnesia:dirty_last(list_to_atom(ChatId)).

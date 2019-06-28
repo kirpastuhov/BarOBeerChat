@@ -38,8 +38,11 @@
 %%--------------------------------------------------------------------
 -spec(start_link(Arg :: term()) ->
   {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
-start_link({Username, WriterPid, Clients}) ->
-  gen_server:start_link(?MODULE, [Username, WriterPid, Clients], []).
+% start_link({Username, LastMsg, WriterPid, Clients}) ->
+%   gen_server:start_link(?MODULE, [Username, LastMsg, WriterPid, Clients], []).
+
+start_link({Username,LastMsg ,WriterPid, Clients}) ->
+  gen_server:start_link(?MODULE, [Username, LastMsg, WriterPid, Clients], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -59,11 +62,11 @@ start_link({Username, WriterPid, Clients}) ->
 -spec(init(Args :: term()) ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
-init([Username, WriterPid, Clients]) ->
+init([Username, LastMsg, WriterPid, Clients]) ->
   %% if it isn't the only client he joins to other
   if
     length(Clients) /= 1 ->
-      join(Clients);
+      join(Clients, LastMsg);
     true -> ok
   end,
   {ok, #state{name = Username, writer = WriterPid, clients = Clients}}.
@@ -93,11 +96,11 @@ handle_call({send, Message}, _From, State) ->
 
 %% Expected when got new client in the chat
 %% Answered with its own clients list
-handle_call({joined, Client}, _From, State) ->
+handle_call({joined, Client, Messages}, _From, State) ->
   {Tag, Username, WriterPid, Clients} = State,
   {Guest, _, _, _} = Client,
   WriterPid ! {message, {Guest, "joined"}},
-  send_clients_list(Client, Clients),
+  send_clients_list(Client, Clients, Messages),
   NewState = {Tag, Username, WriterPid, [Client | Clients]},
   {reply, ok, NewState};
 
@@ -226,7 +229,7 @@ send_message({Name, Message, Clients}) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 save_message(ChatId, {Name, Message}) ->
   Row = #message{name = Name, message = Message,
-    msg_id = mnesia:dirty_last(list_to_atom(ChatId)) + 1},
+    msg_id = calendar:datetime_to_gregorian_seconds(calendar:local_time())},
   F = fun() -> mnesia:write(list_to_atom(ChatId),Row, write) end,
   mnesia:transaction(F).
 
@@ -247,6 +250,19 @@ leave(Clients) ->
 %% Sends everyone information about current client   %%
 %% if can't connect calls function found_dead_client %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+join(Clients, LastMsg) ->
+  [ThisClient | RemoteNodes] = lists:reverse(Clients),
+  F = fun(Client) ->
+    {_, Address, Port, _} = Client,
+    Term = {join, ThisClient, LastMsg},
+    bobc_net:safe_send({Address, Port}, Term, {?MODULE, found_dead_client, [Client, self()]})
+      end,
+  lists:map(F, RemoteNodes).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Sends everyone information about current client   %%
+%% if can't connect calls function found_dead_client %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 join(Clients) ->
   [ThisClient | RemoteNodes] = lists:reverse(Clients),
   F = fun(Client) ->
@@ -255,14 +271,13 @@ join(Clients) ->
     bobc_net:safe_send({Address, Port}, Term, {?MODULE, found_dead_client, [Client, self()]})
       end,
   lists:map(F, RemoteNodes).
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Sends a list of active Clients to the NewClient   %%
 %% if can't connect calls function found_dead_client %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-send_clients_list(NewClient, Clients) ->
+send_clients_list(NewClient, Clients, Messages) ->
   {_, Address, Port, _} = NewClient,
-  Term = {client_list, Clients},
+  Term = {client_list, Clients, Messages},
   bobc_net:safe_send({Address, Port}, Term, {?MODULE, found_dead_client, [NewClient, self()]}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
