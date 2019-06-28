@@ -15,9 +15,9 @@
 
 
 %% API
--export([start/1]).
+-export([start/1, main/4]).
 
--export([init_database/1, writer_loop/0, reader_loop/3, handle_connection/1]).
+-export([writer_loop/0, reader_loop/3, handle_connection/1]).
 
 start([PortArg, ServerAddressArg, ServerPortArg]) ->
 
@@ -31,187 +31,12 @@ start([PortArg, ServerAddressArg, ServerPortArg]) ->
   io:format("Type register <Username> <Password> to sign up~nType login <Username> <Password> to sign in~n~n"),
 
 
-  authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort),
+  bobc_authorization_window:show_window(ServerAddress, ServerPort, LocalAddress, LocalPort),
 
   io:format("~nBye!~n"),
 
   init:stop().
 
-authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort) ->
-
-  Input = string:strip(io:get_line(""), both, $\n),
-  List = string:split(Input, " ", all),
-
-  case List of
-
-
-    ["register", Username, Password] ->
-      io:format("Connecting to server...~n"),
-      case bobc_utils:send_term({ServerAddress, ServerPort}, {register, Username, Password}) of
-
-        {ok, _} ->
-
-          receive
-
-            {tcp, _Socket, Msg} ->
-              Reply = binary_to_term(Msg),
-
-              case Reply of
-
-                {success} ->
-                  io:format(os:cmd(clear)),
-                  io:format("Hello, ~s!~n~nTo create new chat type 'create'~nTo connect to existing one type 'connect <chat_id>'~n~n", [Username]),
-                  connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort);
-
-                {in_use} ->
-                  io:format("This username is in use, try another~n"),
-                  authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort)
-              end
-
-          after 2000 ->
-            io:format("Server is not responding, but you can try once more~n"),
-            authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort)
-          end;
-
-        {error, _Reason} -> io:format("Connection failed, but you could try again~n"),
-          authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort)
-      end;
-
-
-    ["login", Username, Password] ->
-      io:format("Connecting to server...~n"),
-      case bobc_utils:send_term({ServerAddress, ServerPort}, {login, Username, Password}) of
-
-        {ok, _} ->
-
-          receive
-            {tcp, _Socket, Msg} ->
-              Reply = binary_to_term(Msg),
-
-              case Reply of
-
-                {success} ->
-                  io:format(os:cmd(clear)),
-                  io:format("Hello, ~s!~n~nTo create new chat type 'create'~nTo connect to existing one type 'connect <chat_id>'~n~n", [Username]),
-                  connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort);
-
-                {not_found} ->
-                  io:format("This username is not found~n"),
-                  authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort);
-
-                {wrong_password} ->
-                  io:format("Wrong password~n"),
-                  authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort)
-              end
-
-          after 2000 ->
-            io:format("Server is not responding, but you can try once more~n"),
-            authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort)
-          end;
-
-        {error, _Reason} -> io:format("Connection failed, but you could try again~n"),
-          authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort)
-      end;
-
-    ["exit"] -> ok;
-    _ ->
-      io:format("Unknown command~n"),
-      authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort)
-  end.
-
-connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort) ->
-
-
-
-  {PublicKey, PrivateKey} = bobc_crypto:generateKeys(),
-
-  ThisUser = {Username, LocalAddress, LocalPort, PublicKey},
-
-  Input = string:strip(io:get_line(""), both, $\n),
-  List = string:split(Input, " ", all),
-
-  case List of
-
-    ["create"] ->
-      io:format("Connecting to server...~n"),
-      case bobc_utils:send_term({ServerAddress, ServerPort}, {create, ThisUser}) of
-
-        {ok, _} ->
-
-          receive
-            {tcp, _Socket, Msg} ->
-              Reply = binary_to_term(Msg),
-
-              case Reply of
-
-                {connect, ChatId} ->
-                  io:format(os:cmd(clear)),
-                  main(Username, ChatId, [{Username, LocalAddress, LocalPort, PublicKey}], PrivateKey),
-                  bobc_utils:send_term({ServerAddress, ServerPort}, {left, ThisUser, ChatId})
-
-              end
-
-          after 2000 ->
-            io:format("Server is not responding, but you can try once more~n"),
-            connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort)
-          end;
-
-        {error, _Reason} -> io:format("Connection failed, but you could try again~n"),
-          connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort)
-      end;
-
-
-    ["connect", ChatId] ->
-      io:format("Connecting to server...~n"),
-      case bobc_utils:send_term({ServerAddress, ServerPort}, {connect, ChatId, ThisUser}) of
-
-        {ok, _} ->
-
-          receive
-            {tcp, _Socket, Msg} ->
-              Reply = binary_to_term(Msg),
-
-              case Reply of
-
-                {connect, GotChatId, RemoteUsers} ->
-                  [{RemoteUsername, Address, Port, _} | _] = RemoteUsers,
-                  io:format("Connecting to ~s - ~p:~p~n", [RemoteUsername, Address, Port]),
-                  io:format(os:cmd(clear)),
-                  main(Username, GotChatId, lists:reverse([{Username, LocalAddress, LocalPort, PublicKey}] ++ RemoteUsers), PrivateKey),
-                  bobc_utils:send_term({ServerAddress, ServerPort}, {left, ThisUser, GotChatId});
-
-                {connect, GotChatId} ->
-                  io:format(os:cmd(clear)),
-                  main(Username, GotChatId, [{Username, LocalAddress, LocalPort, PublicKey}], PrivateKey),
-                  bobc_utils:send_term({ServerAddress, ServerPort}, {left, ThisUser, GotChatId});
-
-                {not_found} ->
-                  io:format("Chat not found~n"),
-                  connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort);
-
-                Reply ->
-                  io:format("Reply: ~p~n", [Reply])
-
-              end
-
-          after 2000 ->
-            io:format("Server is not responding, but you can try once more~n"),
-            connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort)
-          end;
-
-        {error, _Reason} -> io:format("Connection failed, but you could try again~n"),
-          connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort)
-      end;
-
-
-    ["exit", ChatId] -> bobc_utils:send_term({ServerAddress, ServerPort}, {left, ThisUser, ChatId}),
-      connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort);
-
-    ["exit"] -> ok;
-    _ ->
-      io:format("Unknown command~n"),
-      connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort)
-  end.
 
 main(Username, ChatId, Clients, PrivateKey) ->
   init_database(ChatId),
