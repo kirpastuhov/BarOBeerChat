@@ -6,30 +6,33 @@
 %%% @end
 %%% Created : 25. Июнь 2019 0:14
 %%%-------------------------------------------------------------------
--module(manager_server).
+-module(bobc_main_server).
 -author("User").
 
 -include_lib("stdlib/include/qlc.hrl").
 
--import(utils, [generate_chars_and_numbers/1]).
+%% Definition of the chatroom table
+-record(chatroom, {chat_id :: term(), client = [] :: [term()]}).
 
--record(chatroom, {chat_id :: term(), client = [] :: term()}).
-
+%% Definition of the user table
 -record(user, {login :: term(), password :: term()}).
 
 
 %% API
 -export([start/1]).
 
--export([tcp_receiver_loop/1, accept/1, handle_connection/1]).
+%% Local functions
+-export([handle_connection/1]).
 
-
+%% Main function
 start([PortArg]) ->
   Port = list_to_integer(atom_to_list(PortArg)),
 
   init_database(),
 
-  spawn_link(?MODULE, tcp_receiver_loop, [Port]),
+  %% bobc_net function that listens for incoming connections
+  %% and sends them to defined function of this module
+  spawn_link(bobc_net, tcp_listener_loop, [Port, [?MODULE, handle_connection]]),
 
   io:format("Server successfully started~nType 'exit' to stop it~n"),
 
@@ -39,7 +42,14 @@ start([PortArg]) ->
 
   init:stop().
 
-
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Creates schema and two databases: User and Chatroom if they don't exist %%
+%%                                                                         %%
+%% Table user is responsible for store users authentication information    %%
+%%                                                                         %%
+%% Table chatroom stores list of active users of each chatroom and provide %%
+%% it to users that want to connect to certain chat                        %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 init_database() ->
   case mnesia:create_schema([node()]) of
     {error,
@@ -68,31 +78,25 @@ init_database() ->
 
   mnesia:wait_for_tables([chatroom, user], 20000).
 
-
-tcp_receiver_loop(Port) ->
-  {ok, ListenSocket} = gen_tcp:listen(Port, [binary, {active, false}, {packet, raw}]),
-  spawn(?MODULE, accept, [ListenSocket]),
-  timer:sleep(infinity),
-  ok.
-
-
-accept(ListenSocket) ->
-  {ok, Socket} = gen_tcp:accept(ListenSocket),
-  spawn(?MODULE, handle_connection, [Socket]),
-  accept(ListenSocket).
-
-
-handle_connection(Socket) ->
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Function that handle incoming connections               %%
+%% Socket to this function comes from bobc_net module      %%
+%% All you need is to define expected requests and actions %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+handle_connection([Socket | _Args]) ->
   case gen_tcp:recv(Socket, 0, 10000) of
     {ok, Msg} ->
       Input = binary_to_term(Msg),
       case Input of
 
+        %% Expected when user wants to create a new chat
         {create, Client} ->
           ChatId = create_chatroom(),
           gen_tcp:send(Socket, term_to_binary(connect_user_to_chat(ChatId, Client))),
           {Username, _, _, _} = Client,
           io:format("~s created new chat - ~s~n", [Username, ChatId]);
+
+        %% Expected when user wants to connect to existing chat
         {connect, ChatId, Client} ->
           Val = check_chat_if_exists(ChatId),
           if
@@ -103,6 +107,8 @@ handle_connection(Socket) ->
             true ->
               gen_tcp:send(Socket, term_to_binary({not_found}))
           end;
+
+        %% Expected when user wants to authorise
         {login, Login, Password} ->
           Status = check_login(Login, Password),
           case Status of
@@ -112,6 +118,8 @@ handle_connection(Socket) ->
             {not_found} -> gen_tcp:send(Socket, term_to_binary({not_found}));
             {wrong_password} -> gen_tcp:send(Socket, term_to_binary({wrong_password}))
           end;
+
+        %% Expected when user wants to register
         {register, Login, Password} ->
           Status = register_new_user(Login, Password),
           case Status of
@@ -120,11 +128,14 @@ handle_connection(Socket) ->
               gen_tcp:send(Socket, term_to_binary({success}));
             {login_in_use} -> gen_tcp:send(Socket, term_to_binary({in_use}))
           end;
+
+        %% Expected when user lefts the chat
         {left, Client, ChatId} ->
           delete_client_from_chat(Client, ChatId),
           {Username, _, _, _} = Client,
           io:format("~s left the chat ~s~n", [Username, ChatId])
       end,
+
       gen_tcp:close(Socket);
 
     {error, closed} ->
@@ -136,7 +147,9 @@ handle_connection(Socket) ->
 
   end.
 
-
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Generate new chatId and add it to database %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 create_chatroom() ->
   ChatId = generate_chat_id(),
   Row = #chatroom{chat_id = ChatId},
@@ -144,44 +157,41 @@ create_chatroom() ->
   mnesia:transaction(F),
   ChatId.
 
-
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Gets active users of the chat and form the answer %%
+%% to user, if he need to connect to someone         %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 connect_user_to_chat(ChatId, {Username, Address, Port, PublicKey}) ->
   [{_, UsrList}] = do(qlc:q([{X#chatroom.chat_id, X#chatroom.client} || X <- mnesia:table(chatroom), X#chatroom.chat_id =:= ChatId])),
 
   NewUser = {Username, Address, Port, PublicKey},
-  Val = lists:member(NewUser, UsrList),
+  FixedUsrList = bobc_utils:delete_user_by_username(Username, UsrList),
+  NewUsrList = FixedUsrList ++ [NewUser],
 
-  NewUsrList = if
-                 Val -> UsrList;
-                 true -> UsrList ++ [NewUser]
-               end,
-
-  Row = #chatroom{chat_id = ChatId, client = NewUsrList},          % Сохраняем его в бд
+  Row = #chatroom{chat_id = ChatId, client = NewUsrList},
   F = fun() -> mnesia:write(Row) end,
   mnesia:transaction(F),
   if
-    length(UsrList) =:= 0 ->
+    length(FixedUsrList) =:= 0 ->
       {connect, ChatId};
-    true -> User = hd(UsrList),
+    true -> User = hd(FixedUsrList),
       {connect, ChatId, [User]}
   end.
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Deletes user from the list of active users %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 delete_client_from_chat(Client, ChatId) ->
   [{_, UsrList}] = do(qlc:q([{X#chatroom.chat_id, X#chatroom.client} || X <- mnesia:table(chatroom), X#chatroom.chat_id =:= ChatId])),
-  Val = lists:member(Client, UsrList),
-  NewUserList =
-    if
-      Val ->
-        lists:delete(Client, UsrList);
-      true ->
-        UsrList
-    end,
-  Row = #chatroom{chat_id = ChatId, client = NewUserList},          % Сохраняем его в бд
+  {Username, _, _, _} = Client,
+  NewUserList = bobc_utils:delete_user_by_username(Username, UsrList),
+  Row = #chatroom{chat_id = ChatId, client = NewUserList},
   F = fun() -> mnesia:write(Row) end,
   mnesia:transaction(F).
 
-
-
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Returns true if the chat with this chatId exists, false - if not %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 check_chat_if_exists(ChatId) ->
   Res = do(qlc:q([X#chatroom.chat_id || X <- mnesia:table(chatroom), X#chatroom.chat_id =:= ChatId])),
   Val = if
@@ -190,21 +200,27 @@ check_chat_if_exists(ChatId) ->
         end,
   Val.
 
-
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Function-helper that returns the result_set of the query Q %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 do(Q) ->
   F = fun() -> qlc:e(Q) end,
   {atomic, Val} = mnesia:transaction(F),
   Val.
 
-
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Generates unique string of chars and number %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 generate_chat_id() ->
-  ChatId = utils:generate_chars_and_numbers(6),
+  ChatId = bobc_utils:generate_chars_and_numbers(6),
   case check_chat_if_exists(ChatId) of
     true -> generate_chat_id();
     false -> ChatId
   end.
 
-
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Checks if login exists and the password is correct %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 check_login(Login, Password) ->
   User = do(qlc:q([{X#user.login, X#user.password} || X <- mnesia:table(user),
     X#user.login =:= Login])),
@@ -219,7 +235,9 @@ check_login(Login, Password) ->
            end,
   Status.
 
-
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Checks if login is already in use and add it to database is not %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 register_new_user(Login, Password) ->
   DBLogin = do(qlc:q([{X#user.login} || X <- mnesia:table(user), X#user.login =:= Login])),
   if
@@ -231,7 +249,10 @@ register_new_user(Login, Password) ->
   end,
   Status.
 
-
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Process that handles input into terminal %%
+%% Responsible for shutdown the server      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 reader_loop() ->
   Input = string:strip(io:get_line(""), both, $\n),
   case Input of
