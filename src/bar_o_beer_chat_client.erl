@@ -125,7 +125,7 @@ connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort) 
 
 
 
-  {PublicKey, PrivateKey} = generateKeys(),
+  {PublicKey, PrivateKey} = bobc_crypto:generateKeys(),
 
   ThisUser = {Username, LocalAddress, LocalPort, PublicKey},
 
@@ -332,8 +332,3 @@ init(ChatId) ->
       ok
   end,
   mnesia:wait_for_tables([list_to_atom(ChatId)], 20000).
-
-
-generateKeys() ->
-
-    {_PublicKey, _PrivateKey} = crypto:generate_key(rsa, {2048, 257}).

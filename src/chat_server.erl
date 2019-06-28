@@ -123,12 +123,12 @@ handle_call(shutdown, _From, State) ->
 handle_call({print, Username, Message, PrivateKey, ChatId}, _From, State) ->
   {_, _, WriterPid, _} = State,
 
-  DecryptedMessage = crypto:private_decrypt(rsa, Message, PrivateKey, rsa_pkcs1_padding),
+  DecryptedMessage = bobc_crypto:decrypt_message(Message, PrivateKey),
 
   save_message(ChatId, {Username, DecryptedMessage}),
 
 
-  WriterPid ! {message, {Username, binary_to_list(DecryptedMessage)}},
+  WriterPid ! {message, {Username, DecryptedMessage}},
   {reply, ok, State};
 
 
@@ -219,7 +219,7 @@ send_message({Name, Message, State}) ->
 
     {_, _, _, PublicKey} = Client,
 
-    CryptoMessage = crypto:public_encrypt(rsa, list_to_binary(Message), PublicKey, rsa_pkcs1_padding),
+    CryptoMessage = bobc_crypto:encrypt_message(Message, PublicKey),
 
     Msg = {message, Name, CryptoMessage},
     safe_send(Client, Msg)

@@ -1,4 +1,5 @@
 #!/bin/bash
+erlc bobc_crypto.erl
 erlc utils.erl
 erlc chat_server.erl
 erlc bar_o_beer_chat_client.erl
