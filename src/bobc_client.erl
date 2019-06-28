@@ -17,7 +17,7 @@
 %% API
 -export([start/1]).
 
--export([init/1, writer_loop/0, reader_loop/3, tcp_receiver_loop/4, accept/4, handle_connection/4]).
+-export([init_database/1, writer_loop/0, reader_loop/3, handle_connection/1]).
 
 start([PortArg, ServerAddressArg, ServerPortArg]) ->
 
@@ -214,7 +214,7 @@ connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort) 
   end.
 
 main(Username, ChatId, Clients, PrivateKey) ->
-  init(ChatId),
+  init_database(ChatId),
 %% Process that handle incoming messages
   WriterPid = spawn_link(?MODULE, writer_loop, []),
 
@@ -228,7 +228,7 @@ main(Username, ChatId, Clients, PrivateKey) ->
   print_history(ChatId, WriterPid),
 
 
-  spawn_link(?MODULE, tcp_receiver_loop, [ServerPid, LocalPort, PrivateKey, ChatId]),
+  spawn_link(bobc_net, tcp_listener_loop, [LocalPort, [?MODULE, handle_connection, ServerPid, PrivateKey, ChatId]]),
 
 %% Process that handle input
   reader_loop(ServerPid, WriterPid, ChatId).
@@ -255,20 +255,7 @@ reader_loop(ServerPid, WriterPid, ChatId) ->
   end.
 
 
-tcp_receiver_loop(ServerPid, Port, PrivateKey, ChatId) ->
-  {ok, ListenSocket} = gen_tcp:listen(Port, [binary, {active, false}, {packet, raw}]),
-  spawn(?MODULE, accept, [ListenSocket, ServerPid, PrivateKey, ChatId]),
-  timer:sleep(infinity),
-  ok.
-
-
-
-accept(ListenSocket, ServerPid, PrivateKey, ChatId) ->
-  {ok, Socket} = gen_tcp:accept(ListenSocket),
-  spawn(?MODULE, handle_connection, [Socket, ServerPid, PrivateKey, ChatId]),
-  accept(ListenSocket, ServerPid, PrivateKey, ChatId).
-
-handle_connection(Socket, ServerPid, PrivateKey, ChatId) ->
+handle_connection([Socket | [ServerPid | [PrivateKey | [ChatId]]]]) ->
   case gen_tcp:recv(Socket, 0, 10000) of
     {ok, Msg} ->
       Input = binary_to_term(Msg),
@@ -285,31 +272,32 @@ handle_connection(Socket, ServerPid, PrivateKey, ChatId) ->
       gen_tcp:close(Socket);
 
     {error, closed} ->
-      io:format("error"),
+      io:format("Lost connection~n"),
       gen_tcp:close(Socket);
     {error, timeout} ->
-      io:format("Socket , session closed by timeout ~n"),
+      io:format("Lost connection~n"),
       gen_tcp:close(Socket)
 
   end.
 
 
-do(Q, WriterPid) ->
+do(Q) ->
   F = fun() -> qlc:e(Q) end,
   {atomic, Val} = mnesia:transaction(F),
-  Fun = fun(Message) ->
-    {Username, Msg} = Message,
-    WriterPid ! {message, {Username, Msg}}
-        end,
-  lists:map(Fun, Val).
+  Val.
 
 
 print_history(ChatId, WriterPid) ->
   mnesia:start(),
   mnesia:wait_for_tables([list_to_atom(ChatId)], 20000),
-  do(qlc:q([{X#message.name, X#message.message} || X <- mnesia:table(list_to_atom(ChatId))]), WriterPid).
+  Messages = do(qlc:q([{X#message.name, X#message.message} || X <- mnesia:table(list_to_atom(ChatId))])),
+  Fun = fun(Message) ->
+    {Username, Msg} = Message,
+    WriterPid ! {message, {Username, Msg}}
+        end,
+  lists:map(Fun, Messages).
 
-init(ChatId) ->
+init_database(ChatId) ->
   case mnesia:create_schema([node()]) of
     {error,
       {_, {already_exists, _}}} ->

@@ -18,9 +18,9 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Function that starts tcp_listener %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-tcp_listener_loop(Port, {ModuleName, FunctionName}) ->
+tcp_listener_loop(Port, [ModuleName | [FunctionName | Args]]) ->
   {ok, ListenSocket} = gen_tcp:listen(Port, [binary, {active, false}, {packet, raw}]),
-  spawn(?MODULE, accept, [ListenSocket, {ModuleName, FunctionName}]),
+  spawn(?MODULE, accept, [ListenSocket, [ModuleName | [FunctionName | Args]]]),
   timer:sleep(infinity),
   ok.
 
@@ -28,10 +28,10 @@ tcp_listener_loop(Port, {ModuleName, FunctionName}) ->
 %% Function that accepts new connections and send %%
 %% them to ModuleName:FunctionName                %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-accept(ListenSocket, {ModuleName, FunctionName}) ->
+accept(ListenSocket, [ModuleName | [FunctionName | Args]]) ->
   {ok, Socket} = gen_tcp:accept(ListenSocket),
-  spawn(ModuleName, FunctionName, [Socket]),
-  accept(ListenSocket, {ModuleName, FunctionName}).
+  spawn(ModuleName, FunctionName, [[Socket] ++ Args]),
+  accept(ListenSocket, [ModuleName | [FunctionName | Args]]).
 
 
 safe_send({Host, Port}, Term, {ModuleName, FunctionName, Arguments}) ->

@@ -32,7 +32,7 @@ start([PortArg]) ->
 
   %% bobc_net function that listens for incoming connections
   %% and sends them to defined function of this module
-  spawn_link(bobc_net, tcp_listener_loop, [Port, {?MODULE, handle_connection}]),
+  spawn_link(bobc_net, tcp_listener_loop, [Port, [?MODULE, handle_connection]]),
 
   io:format("Server successfully started~nType 'exit' to stop it~n"),
 
@@ -83,7 +83,7 @@ init_database() ->
 %% Socket to this function comes from bobc_net module      %%
 %% All you need is to define expected requests and actions %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-handle_connection(Socket) ->
+handle_connection([Socket | _Args]) ->
   case gen_tcp:recv(Socket, 0, 10000) of
     {ok, Msg} ->
       Input = binary_to_term(Msg),
