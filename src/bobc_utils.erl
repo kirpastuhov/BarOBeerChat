@@ -32,6 +32,9 @@ generate_random_string(Length, AllowedChars) ->
     [], lists:seq(1, Length)
   ).
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Returns the difference between to lists %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 get_difference(List1, List2) ->
   F = fun(Item, DifferenceList) ->
     Val = lists:member(Item, List2),

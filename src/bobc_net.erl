@@ -33,7 +33,11 @@ accept(ListenSocket, [ModuleName | [FunctionName | Args]]) ->
   spawn(ModuleName, FunctionName, [[Socket] ++ Args]),
   accept(ListenSocket, [ModuleName | [FunctionName | Args]]).
 
-
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Sends the term to the {Host, Port}           %%
+%% If it is impossible to establish connection  %%
+%% Calls the ModuleName:FunctionName(Arguments) %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 safe_send({Host, Port}, Term, {ModuleName, FunctionName, Arguments}) ->
   case gen_tcp:connect(Host, Port, [binary, {active, true}, {packet, raw}]) of
     {ok, Socket} ->
