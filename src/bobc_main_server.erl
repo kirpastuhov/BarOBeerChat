@@ -11,8 +11,6 @@
 
 -include_lib("stdlib/include/qlc.hrl").
 
--import(utils, [generate_chars_and_numbers/1]).
-
 %% Definition of the chatroom table
 -record(chatroom, {chat_id :: term(), client = [] :: [term()]}).
 
@@ -167,7 +165,7 @@ connect_user_to_chat(ChatId, {Username, Address, Port, PublicKey}) ->
   [{_, UsrList}] = do(qlc:q([{X#chatroom.chat_id, X#chatroom.client} || X <- mnesia:table(chatroom), X#chatroom.chat_id =:= ChatId])),
 
   NewUser = {Username, Address, Port, PublicKey},
-  FixedUsrList = delete_user_by_username(Username, UsrList),
+  FixedUsrList = bobc_utils:delete_user_by_username(Username, UsrList),
   NewUsrList = FixedUsrList ++ [NewUser],
 
   Row = #chatroom{chat_id = ChatId, client = NewUsrList},
@@ -186,7 +184,7 @@ connect_user_to_chat(ChatId, {Username, Address, Port, PublicKey}) ->
 delete_client_from_chat(Client, ChatId) ->
   [{_, UsrList}] = do(qlc:q([{X#chatroom.chat_id, X#chatroom.client} || X <- mnesia:table(chatroom), X#chatroom.chat_id =:= ChatId])),
   {Username, _, _, _} = Client,
-  NewUserList = delete_user_by_username(Username, UsrList),
+  NewUserList = bobc_utils:delete_user_by_username(Username, UsrList),
   Row = #chatroom{chat_id = ChatId, client = NewUserList},
   F = fun() -> mnesia:write(Row) end,
   mnesia:transaction(F).
@@ -214,7 +212,7 @@ do(Q) ->
 %% Generates unique string of chars and number %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 generate_chat_id() ->
-  ChatId = utils:generate_chars_and_numbers(6),
+  ChatId = bobc_utils:generate_chars_and_numbers(6),
   case check_chat_if_exists(ChatId) of
     true -> generate_chat_id();
     false -> ChatId
@@ -261,17 +259,3 @@ reader_loop() ->
     "exit" -> ok;
     _ -> reader_loop()
   end.
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Deletes all users with name "Username" from the list "Users" %%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-delete_user_by_username(Username, Users) ->
-  F = fun(User, Acc) ->
-    {Name, _, _, _} = User,
-    NewAcc = if
-               Name /= Username -> Acc ++ [User];
-               true -> Acc
-             end,
-    NewAcc
-      end,
-  lists:foldl(F, [], Users).

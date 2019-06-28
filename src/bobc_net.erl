@@ -10,7 +10,7 @@
 -author("User").
 
 %% API
--export([tcp_listener_loop/2]).
+-export([tcp_listener_loop/2, safe_send/3]).
 
 %% Local functions
 -export([accept/2]).
@@ -32,3 +32,12 @@ accept(ListenSocket, {ModuleName, FunctionName}) ->
   {ok, Socket} = gen_tcp:accept(ListenSocket),
   spawn(ModuleName, FunctionName, [Socket]),
   accept(ListenSocket, {ModuleName, FunctionName}).
+
+
+safe_send({Host, Port}, Term, {ModuleName, FunctionName, Arguments}) ->
+  case gen_tcp:connect(Host, Port, [binary, {active, true}, {packet, raw}]) of
+    {ok, Socket} ->
+      gen_tcp:send(Socket, term_to_binary(Term)),
+      gen_tcp:close(Socket);
+    {error, _} -> spawn_link(ModuleName, FunctionName, Arguments)
+  end.

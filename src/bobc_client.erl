@@ -6,15 +6,13 @@
 %%% @end
 %%% Created : 21. Июнь 2019 1:33
 %%%-------------------------------------------------------------------
--module(bar_o_beer_chat_client).
+-module(bobc_client).
 -author("User").
 
 -include_lib("stdlib/include/qlc.hrl").
 
 -record(message, {msg_id, name, message}).
 
--import(chat_server, [start_link/1]).
--import(utils, [send_term/2]).
 
 %% API
 -export([start/1]).
@@ -49,7 +47,7 @@ authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort) ->
 
     ["register", Username, Password] ->
       io:format("Connecting to server...~n"),
-      case send_term({ServerAddress, ServerPort}, {register, Username, Password}) of
+      case bobc_utils:send_term({ServerAddress, ServerPort}, {register, Username, Password}) of
 
         {ok, _} ->
 
@@ -82,7 +80,7 @@ authorization_window(ServerAddress, ServerPort, LocalAddress, LocalPort) ->
 
     ["login", Username, Password] ->
       io:format("Connecting to server...~n"),
-      case send_term({ServerAddress, ServerPort}, {login, Username, Password}) of
+      case bobc_utils:send_term({ServerAddress, ServerPort}, {login, Username, Password}) of
 
         {ok, _} ->
 
@@ -136,7 +134,7 @@ connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort) 
 
     ["create"] ->
       io:format("Connecting to server...~n"),
-      case send_term({ServerAddress, ServerPort}, {create, ThisUser}) of
+      case bobc_utils:send_term({ServerAddress, ServerPort}, {create, ThisUser}) of
 
         {ok, _} ->
 
@@ -149,7 +147,7 @@ connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort) 
                 {connect, ChatId} ->
                   io:format(os:cmd(clear)),
                   main(Username, ChatId, [{Username, LocalAddress, LocalPort, PublicKey}], PrivateKey),
-                  send_term({ServerAddress, ServerPort}, {left, ThisUser, ChatId})
+                  bobc_utils:send_term({ServerAddress, ServerPort}, {left, ThisUser, ChatId})
 
               end
 
@@ -165,7 +163,7 @@ connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort) 
 
     ["connect", ChatId] ->
       io:format("Connecting to server...~n"),
-      case send_term({ServerAddress, ServerPort}, {connect, ChatId, ThisUser}) of
+      case bobc_utils:send_term({ServerAddress, ServerPort}, {connect, ChatId, ThisUser}) of
 
         {ok, _} ->
 
@@ -180,12 +178,12 @@ connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort) 
                   io:format("Connecting to ~s - ~p:~p~n", [RemoteUsername, Address, Port]),
                   io:format(os:cmd(clear)),
                   main(Username, GotChatId, lists:reverse([{Username, LocalAddress, LocalPort, PublicKey}] ++ RemoteUsers), PrivateKey),
-                  send_term({ServerAddress, ServerPort}, {left, ThisUser, GotChatId});
+                  bobc_utils:send_term({ServerAddress, ServerPort}, {left, ThisUser, GotChatId});
 
                 {connect, GotChatId} ->
                   io:format(os:cmd(clear)),
                   main(Username, GotChatId, [{Username, LocalAddress, LocalPort, PublicKey}], PrivateKey),
-                  send_term({ServerAddress, ServerPort}, {left, ThisUser, GotChatId});
+                  bobc_utils:send_term({ServerAddress, ServerPort}, {left, ThisUser, GotChatId});
 
                 {not_found} ->
                   io:format("Chat not found~n"),
@@ -206,7 +204,7 @@ connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort) 
       end;
 
 
-    ["exit", ChatId] -> send_term({ServerAddress, ServerPort}, {left, ThisUser, ChatId}),
+    ["exit", ChatId] -> bobc_utils:send_term({ServerAddress, ServerPort}, {left, ThisUser, ChatId}),
       connection_window(Username, ServerAddress, ServerPort, LocalAddress, LocalPort);
 
     ["exit"] -> ok;
@@ -224,7 +222,7 @@ main(Username, ChatId, Clients, PrivateKey) ->
   {_, _, LocalPort, _} = ThisClient,
 
 %% Gen_server
-  {ok, ServerPid} = chat_server:start_link({Username, WriterPid, Clients}),
+  {ok, ServerPid} = bobc_gen_server:start_link({Username, WriterPid, Clients}),
 
   %%prints local history (for a start)
   print_history(ChatId, WriterPid),

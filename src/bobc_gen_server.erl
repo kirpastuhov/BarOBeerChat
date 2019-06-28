@@ -6,7 +6,7 @@
 %%% @end
 %%% Created : 20. Июнь 2019 15:57
 %%%-------------------------------------------------------------------
--module(chat_server).
+-module(bobc_gen_server).
 -author("User").
 
 -behaviour(gen_server).
@@ -60,6 +60,7 @@ start_link({Username, WriterPid, Clients}) ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([Username, WriterPid, Clients]) ->
+  %% if it isn't the only client he joins to other
   if
     length(Clients) /= 1 ->
       join(Clients);
@@ -83,11 +84,15 @@ init([Username, WriterPid, Clients]) ->
   {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
   {stop, Reason :: term(), NewState :: #state{}}).
 
+%% Expected when this client wants to send a message
+%% Calls function send_message to send message
 handle_call({send, Message}, _From, State) ->
-  {_, Name, _, _} = State,
-  send_message({Name, Message, State}),
+  {_, Name, _, Clients} = State,
+  send_message({Name, Message, Clients}),
   {reply, ok, State};
 
+%% Expected when got new client in the chat
+%% Answered with its own clients list
 handle_call({joined, Client}, _From, State) ->
   {Tag, Username, WriterPid, Clients} = State,
   {Guest, _, _, _} = Client,
@@ -96,43 +101,42 @@ handle_call({joined, Client}, _From, State) ->
   NewState = {Tag, Username, WriterPid, [Client | Clients]},
   {reply, ok, NewState};
 
+%% Expected when someone leaves the chat
+%% Deletes user from its own clients list
 handle_call({left, Client}, _From, State) ->
   {Tag, Username, WriterPid, Clients} = State,
   {Guest, _, _, _} = Client,
   WriterPid ! {message, {Guest, "left"}},
-  NewClients = lists:delete(Client, Clients),
+  NewClients = bobc_utils:delete_user_by_username(Guest, Clients),
   NewState = {Tag, Username, WriterPid, NewClients},
   {reply, ok, NewState};
 
+%% Expected when this client got a new list of Clients to connect
+%% Calls function join and adds NewClients to its state
 handle_call({join, NewClients}, _From, State) ->
   {Tag, Username, WriterPid, Clients} = State,
   [ThisClient | RemoteNodes] = lists:reverse(Clients),
-  DifferentClients = get_difference(RemoteNodes, NewClients),
+  DifferentClients = bobc_utils:get_difference(RemoteNodes, NewClients),
   join(lists:reverse([ThisClient | DifferentClients])),
   NewState = {Tag, Username, WriterPid, DifferentClients ++ Clients},
   {reply, ok, NewState};
 
-
+%% Expected when this client is going to leave
+%% Shutdowns writer and itself
 handle_call(shutdown, _From, State) ->
   {_, _, WriterPid, Clients} = State,
   leave(Clients),
   WriterPid ! shutdown,
   {stop, normal, ok, State};
 
-
+%% Expected when this client gets a new message
+%% Saves message into database and print it
 handle_call({print, Username, Message, PrivateKey, ChatId}, _From, State) ->
   {_, _, WriterPid, _} = State,
-
   DecryptedMessage = bobc_crypto:decrypt_message(Message, PrivateKey),
-
   save_message(ChatId, {Username, DecryptedMessage}),
-
-
   WriterPid ! {message, {Username, DecryptedMessage}},
   {reply, ok, State};
-
-
-
 
 handle_call(_Request, _From, State) ->
   {reply, [_Request | State], State}.
@@ -203,77 +207,66 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-safe_send(Client, Term) ->
-  {Username, Host, Port, PublicKey} = Client,
-  case gen_tcp:connect(Host, Port, [binary, {active, true}, {packet, raw}]) of
-    {ok, Socket} ->
-      gen_tcp:send(Socket, term_to_binary(Term)),
-      gen_tcp:close(Socket);
-    {error, _} -> spawn_link(?MODULE, found_dead_client, [{Username, Host, Port, PublicKey}, self()])
-  end.
-
-send_message({Name, Message, State}) ->
-  Clients = State#state.clients,
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Encrypts and sends message for everyone in the Clients %%
+%% if can't connect calls function found_dead_client      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+send_message({Name, Message, Clients}) ->
   F = fun(Client) ->
-
-
-    {_, _, _, PublicKey} = Client,
-
+    {_, Address, Port, PublicKey} = Client,
     CryptoMessage = bobc_crypto:encrypt_message(Message, PublicKey),
-
     Msg = {message, Name, CryptoMessage},
-    safe_send(Client, Msg)
+    bobc_net:safe_send({Address, Port}, Msg, {?MODULE, found_dead_client, [Client, self()]})
       end,
   lists:map(F, Clients),
   ok.
 
-found_dead_client({Username, Host, Port, PublicKey}, ServerPid) ->
-  gen_server:call(ServerPid, {left, {Username, Host, Port, PublicKey}}).
-
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Saves message into database %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 save_message(ChatId, {Name, Message}) ->
-
   Row = #message{name = Name, message = Message,
     msg_id = mnesia:dirty_last(list_to_atom(ChatId)) + 1},
   F = fun() -> mnesia:write(list_to_atom(ChatId),Row, write) end,
   mnesia:transaction(F).
 
-
-
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Sends every client a message that client is going to leave %%
+%% if can't connect calls function found_dead_client          %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 leave(Clients) ->
   [ThisClient | RemoteNodes] = lists:reverse(Clients),
   F = fun(Client) ->
+    {_, Address, Port, _} = Client,
     Term = {left, ThisClient},
-    safe_send(Client, Term)
+    bobc_net:safe_send({Address, Port}, Term, {?MODULE, found_dead_client, [Client, self()]})
       end,
-
   lists:map(F, RemoteNodes).
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Sends everyone information about current client   %%
+%% if can't connect calls function found_dead_client %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 join(Clients) ->
   [ThisClient | RemoteNodes] = lists:reverse(Clients),
-
   F = fun(Client) ->
+    {_, Address, Port, _} = Client,
     Term = {join, ThisClient},
-    safe_send(Client, Term)
+    bobc_net:safe_send({Address, Port}, Term, {?MODULE, found_dead_client, [Client, self()]})
       end,
-
   lists:map(F, RemoteNodes).
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Sends a list of active Clients to the NewClient   %%
+%% if can't connect calls function found_dead_client %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 send_clients_list(NewClient, Clients) ->
+  {_, Address, Port, _} = NewClient,
   Term = {client_list, Clients},
-  safe_send(NewClient, Term).
+  bobc_net:safe_send({Address, Port}, Term, {?MODULE, found_dead_client, [NewClient, self()]}).
 
-
-get_difference(List1, List2) ->
-  F = fun(Client, DifferenceList) ->
-    Val = lists:member(Client, List2),
-    if Val -> DifferenceList;
-      true -> [Client | DifferenceList]
-    end
-      end,
-  F2 = fun(Client, DifferenceList) ->
-    Val = lists:member(Client, List1),
-    if Val -> DifferenceList;
-      true -> [Client | DifferenceList]
-    end
-       end,
-  lists:foldl(F2, [], List2) ++ lists:foldl(F, [], List1).
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Tells gen_server that Client is offline %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+found_dead_client({Username, Host, Port, PublicKey}, ServerPid) ->
+  gen_server:call(ServerPid, {left, {Username, Host, Port, PublicKey}}).
