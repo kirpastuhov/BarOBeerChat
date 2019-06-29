@@ -41,8 +41,8 @@
 % start_link({Username, LastMsg, WriterPid, Clients}) ->
 %   gen_server:start_link(?MODULE, [Username, LastMsg, WriterPid, Clients], []).
 
-start_link({Username,LastMsg ,WriterPid, Clients}) ->
-  gen_server:start_link(?MODULE, [Username, LastMsg, WriterPid, Clients], []).
+start_link({Username,WriterPid, Clients}) ->
+  gen_server:start_link(?MODULE, [Username,WriterPid, Clients], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -62,11 +62,11 @@ start_link({Username,LastMsg ,WriterPid, Clients}) ->
 -spec(init(Args :: term()) ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
-init([Username, LastMsg, WriterPid, Clients]) ->
+init([Username, WriterPid, Clients]) ->
   %% if it isn't the only client he joins to other
   if
     length(Clients) /= 1 ->
-      join(Clients, LastMsg);
+      join(Clients);
     true -> ok
   end,
   {ok, #state{name = Username, writer = WriterPid, clients = Clients}}.
@@ -96,11 +96,11 @@ handle_call({send, Message}, _From, State) ->
 
 %% Expected when got new client in the chat
 %% Answered with its own clients list
-handle_call({joined, Client, Messages}, _From, State) ->
+handle_call({joined, Client}, _From, State) ->
   {Tag, Username, WriterPid, Clients} = State,
   {Guest, _, _, _} = Client,
   WriterPid ! {message, {Guest, "joined"}},
-  send_clients_list(Client, Clients, Messages),
+  send_clients_list(Client, Clients),
   NewState = {Tag, Username, WriterPid, [Client | Clients]},
   {reply, ok, NewState};
 
@@ -246,18 +246,7 @@ leave(Clients) ->
       end,
   lists:map(F, RemoteNodes).
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Sends everyone information about current client   %%
-%% if can't connect calls function found_dead_client %%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-join(Clients, LastMsg) ->
-  [ThisClient | RemoteNodes] = lists:reverse(Clients),
-  F = fun(Client) ->
-    {_, Address, Port, _} = Client,
-    Term = {join, ThisClient, LastMsg},
-    bobc_net:safe_send({Address, Port}, Term, {?MODULE, found_dead_client, [Client, self()]})
-      end,
-  lists:map(F, RemoteNodes).
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Sends everyone information about current client   %%
@@ -275,9 +264,9 @@ join(Clients) ->
 %% Sends a list of active Clients to the NewClient   %%
 %% if can't connect calls function found_dead_client %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-send_clients_list(NewClient, Clients, Messages) ->
+send_clients_list(NewClient, Clients) ->
   {_, Address, Port, _} = NewClient,
-  Term = {client_list, Clients, Messages},
+  Term = {client_list, Clients},
   bobc_net:safe_send({Address, Port}, Term, {?MODULE, found_dead_client, [NewClient, self()]}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
